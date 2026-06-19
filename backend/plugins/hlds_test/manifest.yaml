@@ -1,5 +1,6 @@
 name: "Half-Life Dedicated Server (Test)"
 id: "hlds_test"
+category: "Shooter"
 engine: "steamcmd"
 steam_app_id: 90
 executable_windows: "hlds.exe"
@@ -13,3 +14,22 @@ default_args:
   - "crossfire"
 ports:
   - 27015
+backup:
+  source_path: "valve"
+# --- NEU: Definition der edtierbaren Server-Einstellungen ---
+config_meta:
+  file_path: "valve/server.cfg"
+  format: "key_value" # Typisches cvar-Format (Befehl Wert)
+  fields:
+    - key: "hostname"
+      label: "Server-Name (Host Name)"
+      type: "text"
+      default: "EmberCore Dedicated Server"
+    - key: "maxplayers"
+      label: "Maximale Spieleranzahl"
+      type: "number"
+      default: 32
+    - key: "sv_password"
+      label: "Server-Passwort (leer für öffentlich)"
+      type: "text"
+      default: ""
