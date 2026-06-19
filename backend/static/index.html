@@ -13,9 +13,19 @@
 <body>
     <div id="app" class="min-h-screen flex flex-col">
         <header class="bg-gray-900 border-b border-gray-800 p-4 flex justify-between items-center shadow-md">
-            <div class="flex items-center space-x-3">
-                <span class="text-2xl font-bold tracking-wider text-orange-500">🔥 EmberCore</span>
-                <span class="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded border border-gray-700">v0.1.0</span>
+            <div class="flex items-center space-x-6">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl font-bold tracking-wider text-orange-500">🔥 EmberCore</span>
+                    <span class="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded border border-gray-700">v0.1.0</span>
+                </div>
+                <nav class="flex space-x-2">
+                    <button @click="currentTab = 'dashboard'" :class="currentTab === 'dashboard' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:bg-gray-800'" class="px-4 py-2 rounded-lg font-medium transition cursor-pointer">
+                        🖥️ Meine Server
+                    </button>
+                    <button @click="currentTab = 'marketplace'" :class="currentTab === 'marketplace' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:bg-gray-800'" class="px-4 py-2 rounded-lg font-medium transition cursor-pointer">
+                        🛒 Plugins abonnieren
+                    </button>
+                </nav>
             </div>
             <div class="flex items-center space-x-2">
                 <span class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
@@ -23,39 +33,26 @@
             </div>
         </header>
 
-        <main class="flex-1 max-w-6xl w-full mx-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <main v-if="currentTab === 'dashboard'" class="flex-1 max-w-6xl w-full mx-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="bg-gray-900 rounded-xl p-4 border border-gray-800 shadow-xl h-fit">
-                <h2 class="text-lg font-semibold mb-4 text-gray-300">Verfügbare Plugins</h2>
+                <h2 class="text-lg font-semibold mb-4 text-gray-300">Abonnierte Server</h2>
                 <div class="space-y-2">
                     <button
                         @click="selectPlugin('hlds_test')"
                         :class="selectedPlugin === 'hlds_test' ? 'border-orange-500 bg-gray-800 text-orange-400' : 'border-gray-800 bg-gray-950 hover:bg-gray-800 text-gray-400'"
-                        class="w-full text-left p-3 rounded-lg border transition flex justify-between items-center"
+                        class="w-full text-left p-3 rounded-lg border transition flex justify-between items-center cursor-pointer"
                     >
                         <div>
                             <p class="font-medium">Half-Life Server</p>
                             <p class="text-xs text-gray-500">ID: hlds_test (SteamCMD)</p>
                         </div>
-                        <span class="text-xs bg-gray-900 px-2 py-0.5 rounded text-gray-400">PoC</span>
-                    </button>
-
-                    <button
-                        @click="selectPlugin('conan_exiles')"
-                        :class="selectedPlugin === 'conan_exiles' ? 'border-orange-500 bg-gray-800 text-orange-400' : 'border-gray-800 bg-gray-950 hover:bg-gray-800 text-gray-400'"
-                        class="w-full text-left p-3 rounded-lg border transition flex justify-between items-center opacity-60"
-                    >
-                        <div>
-                            <p class="font-medium">Conan Exiles</p>
-                            <p class="text-xs text-gray-500">ID: conan_exiles (SteamCMD)</p>
-                        </div>
-                        <span class="text-xs bg-gray-900 px-2 py-0.5 rounded text-gray-400">M1</span>
                     </button>
                 </div>
             </div>
 
             <div class="md:grid-cols-1 md:col-span-2 space-y-6">
                 <div v-if="!selectedPlugin" class="bg-gray-900 rounded-xl p-12 border border-gray-800 text-center text-gray-500 shadow-xl">
-                    <p class="text-xl">Bitte wähle ein Spiele-Plugin aus der linken Liste aus.</p>
+                    <p class="text-xl">Bitte wähle eine Server-Instanz aus.</p>
                 </div>
 
                 <div v-else class="bg-gray-900 rounded-xl p-6 border border-gray-800 shadow-xl space-y-6">
@@ -70,27 +67,9 @@
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <button
-                            @click="installServer"
-                            :disabled="isActionLoading || serverStats.status === 'online'"
-                            class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed"
-                        >
-                            📦 Installieren / Update
-                        </button>
-                        <button
-                            @click="startServer"
-                            :disabled="isActionLoading || serverStats.status === 'online'"
-                            class="bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed"
-                        >
-                            ▶️ Server Starten
-                        </button>
-                        <button
-                            @click="stopServer"
-                            :disabled="isActionLoading || serverStats.status === 'offline'"
-                            class="bg-red-600 hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed"
-                        >
-                            ⏹️ Server Stoppen
-                        </button>
+                        <button @click="installServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed">📦 Installieren / Update</button>
+                        <button @click="startServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-green-600 hover:bg-green-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed">▶️ Server Starten</button>
+                        <button @click="stopServer" :disabled="isActionLoading || serverStats.status === 'offline'" class="bg-red-600 hover:bg-red-500 disabled:bg-gray-800 disabled:text-gray-600 text-white font-medium p-3 rounded-lg transition shadow-md cursor-pointer disabled:cursor-not-allowed">⏹️ Server Stoppen</button>
                     </div>
 
                     <div v-if="isActionLoading" class="bg-gray-950 border border-gray-800 p-4 rounded-lg flex items-center space-x-3">
@@ -101,16 +80,42 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="bg-gray-950 p-4 rounded-xl border border-gray-800 shadow-inner">
                             <p class="text-xs text-gray-500 font-semibold tracking-wider uppercase mb-1">CPU-Auslastung</p>
-                            <p class="text-3xl font-mono font-bold text-orange-400">
-                                {{ serverStats.status === 'online' ? serverStats.cpu_percent + ' %' : '---' }}
-                            </p>
+                            <p class="text-3xl font-mono font-bold text-orange-400">{{ serverStats.status === 'online' ? serverStats.cpu_percent + ' %' : '---' }}</p>
                         </div>
                         <div class="bg-gray-950 p-4 rounded-xl border border-gray-800 shadow-inner">
                             <p class="text-xs text-gray-500 font-semibold tracking-wider uppercase mb-1">Arbeitsspeicher (RAM)</p>
-                            <p class="text-3xl font-mono font-bold text-blue-400">
-                                {{ serverStats.status === 'online' ? serverStats.ram_mb + ' MB' : '---' }}
-                            </p>
+                            <p class="text-3xl font-mono font-bold text-blue-400">{{ serverStats.status === 'online' ? serverStats.ram_mb + ' MB' : '---' }}</p>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <main v-if="currentTab === 'marketplace'" class="flex-1 max-w-6xl w-full mx-auto p-6 space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-white">EmberCore Plugin Marktplatz</h1>
+                    <p class="text-sm text-gray-400">Erweitere deinen Manager direkt per Klick aus dem GitHub-Repository</p>
+                </div>
+                <button @click="loadAvailablePlugins" class="bg-gray-800 hover:bg-gray-700 text-sm font-medium px-4 py-2 rounded-lg border border-gray-700 cursor-pointer">🔄 Liste aktualisieren</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div v-for="plugin in availablePlugins" :key="plugin.id" class="bg-gray-900 rounded-xl border border-gray-800 p-5 flex flex-col justify-between shadow-xl transition hover:border-gray-700">
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-start">
+                            <span class="text-xs bg-orange-950 text-orange-400 border border-orange-900 px-2 py-0.5 rounded-md font-semibold tracking-wide uppercase">{{ plugin.category }}</span>
+                            <span class="text-xs text-gray-500 font-mono">v{{ plugin.version }}</span>
+                        </div>
+                        <h3 class="text-xl font-bold text-white tracking-wide">{{ plugin.name }}</h3>
+                        <p class="text-sm text-gray-400 leading-relaxed">{{ plugin.description }}</p>
+                        <p class="text-xs text-gray-500">Entwickler: <span class="text-gray-400 font-medium">{{ plugin.developer }}</span></p>
+                    </div>
+
+                    <div class="mt-6 border-t border-gray-800 pt-4">
+                        <button @click="subscribePlugin(plugin)" :disabled="isSubscribing === plugin.id" class="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-medium p-2.5 rounded-lg transition cursor-pointer disabled:cursor-not-allowed text-center">
+                            {{ isSubscribing === plugin.id ? '⏳ Abonniere...' : '➕ Plugin abonnieren' }}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -122,10 +127,13 @@
 
         createApp({
             setup() {
+                const currentTab = ref("dashboard");
                 const selectedPlugin = ref(null);
                 const isActionLoading = ref(false);
+                const isSubscribing = ref(null);
                 const loadingMessage = ref("");
                 const serverStats = ref({ status: "offline", cpu_percent: 0, ram_mb: 0 });
+                const availablePlugins = ref([]);
                 let statsInterval = null;
 
                 const selectPlugin = (pluginId) => {
@@ -136,11 +144,28 @@
                 const fetchStats = async () => {
                     try {
                         const res = await fetch('/api/server/stats');
-                        if (res.ok) {
-                            serverStats.value = await res.json();
-                        }
+                        if (res.ok) serverStats.value = await res.json();
+                    } catch (err) { console.error(err); }
+                };
+
+                const loadAvailablePlugins = async () => {
+                    try {
+                        const res = await fetch('/api/plugins/available');
+                        if (res.ok) availablePlugins.value = await res.json();
+                    } catch (err) { console.error(err); }
+                };
+
+                const subscribePlugin = async (plugin) => {
+                    isSubscribing.value = plugin.id;
+                    try {
+                        // Wir schicken die Plugin-ID und die ZIP-URL an unseren UpdateManager im Backend
+                        const res = await fetch(`/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}`, { method: 'POST' });
+                        const data = await res.json();
+                        alert(data.status === "success" ? `Erfolgreich abonniert! Ein neuer Ordner 'plugins/${plugin.id}' wurde angelegt.` : "Fehler: " + data.message);
                     } catch (err) {
-                        console.error("Fehler beim Abrufen der Stats:", err);
+                        alert("Verbindungsfehler zum Backend.");
+                    } finally {
+                        isSubscribing.value = null;
                     }
                 };
 
@@ -152,12 +177,7 @@
                         const res = await fetch(`/api/server/install/${selectedPlugin.value}`, { method: 'POST' });
                         const data = await res.json();
                         alert(data.status === "success" ? "Installation erfolgreich!" : "Fehler: " + data.message);
-                    } catch (err) {
-                        alert("Verbindungsfehler beim Installieren.");
-                    } finally {
-                        isActionLoading.value = false;
-                        fetchStats();
-                    }
+                    } catch (err) { alert("Fehler."); } finally { isActionLoading.value = false; fetchStats(); }
                 };
 
                 const startServer = async () => {
@@ -165,47 +185,34 @@
                     isActionLoading.value = true;
                     loadingMessage.value = "Server wird initialisiert...";
                     try {
-                        const res = await fetch(`/api/server/start/${selectedPlugin.value}`, { method: 'POST' });
-                        const data = await res.json();
-                        if (data.status === "error") alert(data.message);
-                    } catch (err) {
-                        console.error(err);
-                    } finally {
-                        isActionLoading.value = false;
-                        setTimeout(fetchStats, 1000); // Kurz warten bis Prozess registriert ist
-                    }
+                        await fetch(`/api/server/start/${selectedPlugin.value}`, { method: 'POST' });
+                    } catch (err) { console.error(err); } finally { isActionLoading.value = false; setTimeout(fetchStats, 1000); }
                 };
 
                 const stopServer = async () => {
                     isActionLoading.value = true;
-                    loadingMessage.value = "Sende Beendigungs-Signal an Server...";
-                    try {
-                        const res = await fetch('/api/server/stop', { method: 'POST' });
-                        const data = await res.json();
-                        if (data.status === "error") alert(data.message);
-                    } catch (err) {
-                        console.error(err);
-                    } finally {
-                        isActionLoading.value = false;
-                        setTimeout(fetchStats, 500);
-                    }
+                    loadingMessage.value = "Sende Beendigungs-Signal...";
+                    try { await fetch('/api/server/stop', { method: 'POST' }); } catch (err) { console.error(err); } finally { isActionLoading.value = false; setTimeout(fetchStats, 500); }
                 };
 
                 onMounted(() => {
-                    // Alle 2 Sekunden die Auslastung abfragen
                     statsInterval = setInterval(fetchStats, 2000);
+                    loadAvailablePlugins(); // Beim Start direkt Marktplatz-Daten laden
                 });
 
-                onUnmounted(() => {
-                    clearInterval(statsInterval);
-                });
+                onUnmounted(() => { clearInterval(statsInterval); });
 
                 return {
+                    currentTab,
                     selectedPlugin,
                     isActionLoading,
+                    isSubscribing,
                     loadingMessage,
                     serverStats,
+                    availablePlugins,
                     selectPlugin,
+                    loadAvailablePlugins,
+                    subscribePlugin,
                     installServer,
                     startServer,
                     stopServer

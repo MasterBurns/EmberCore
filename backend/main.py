@@ -75,6 +75,33 @@ async def subscribe_plugin(plugin_id: str, url: str):
     # Beispiel-URL zum Testen könnte ein ZIP auf deinem GitHub-Repo sein
     return await update_manager.install_or_update_plugin_from_zip(plugin_id, url)
 
+@app.get("/api/plugins/available")
+async def get_available_plugins():
+    """
+    Fragt das zentrale Plugin-Verzeichnis LIVE von MasterBurns' GitHub ab.
+    """
+    # Die offizielle "Raw"-URL deiner Datei auf GitHub
+    github_url = "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins_directory.json"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # Wir holen uns die JSON-Datei direkt von GitHub
+            response = await client.get(github_url, follow_redirects=True, timeout=5.0)
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"GitHub gab einen Fehlercode zurück: {response.status_code}"
+                )
+    except httpx.RequestError as e:
+        # Falls das System offline ist oder GitHub streikt, fangen wir das sauber ab
+        raise HTTPException(
+            status_code=503,
+            detail=f"Plugin-Verzeichnis konnte nicht geladen werden: {str(e)}"
+        )
+
 # --- NEU: Statischen Ordner als Weboberfläche bereitstellen ---
 # WICHTIG: Das MUSS ganz unten nach den API-Routen stehen, damit /api/Routen Vorrang haben!
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "static"), html=True), name="static")

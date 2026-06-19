@@ -1,0 +1,29 @@
+[
+  {
+    "id": "conan_exiles",
+    "name": "Conan Exiles",
+    "category": "Survival",
+    "version": "1.0.0",
+    "developer": "MasterBurns",
+    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/conan_exiles.zip",
+    "description": "Dedicated Server Modul für Conan Exiles. Unterstützt Wine-Emulation unter Linux (CachyOS tested) und nativen Start unter Windows."
+  },
+  {
+    "id": "palworld",
+    "name": "Palworld",
+    "category": "Survival",
+    "version": "1.0.2",
+    "developer": "Community",
+    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/palworld.zip",
+    "description": "Automatisierte Verwaltung für Palworld Dedicated Server inklusive Optimierungen für RAM-Housekeeping."
+  },
+  {
+    "id": "minecraft_paper",
+    "name": "Minecraft (Paper)",
+    "category": "Sandbox",
+    "version": "2.0.1",
+    "developer": "EmberCore Team",
+    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/minecraft_paper.zip",
+    "description": "Hochperformanter Minecraft-Server mit integrierter Java-Abhängigkeitsprüfung."
+  }
+]
