@@ -1,0 +1,11 @@
+name: "Conan Exiles"
+id: "conan_exiles"
+engine: "steamcmd"
+steam_app_id: 443030
+executable_windows: "ConanSandbox\\Binaries\\Win64\\ConanSandboxServer-Win64-Test.exe"
+default_args:
+  - "-log"
+  - "-MaxPlayers=40"
+ports:
+  - 7777
+  - 27015

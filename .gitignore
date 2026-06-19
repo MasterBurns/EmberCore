@@ -1,0 +1,11 @@
+# Python virtuelle Umgebung
+.venv/
+__pycache__/
+*.pyc
+
+# EmberCore Server-Downloads und SteamCMD (Darf NIEMALS ins Git!)
+backend/servers/
+
+# Lokale IDE-Konfigurationen
+.vscode/
+.idea/

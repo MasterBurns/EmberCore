@@ -1,0 +1,15 @@
+name: "Half-Life Dedicated Server (Test)"
+id: "hlds_test"
+engine: "steamcmd"
+steam_app_id: 90
+executable_windows: "hlds.exe"
+default_args:
+  - "-console"
+  - "-game"
+  - "valve"
+  - "+maxplayers"
+  - "32"
+  - "+map"
+  - "crossfire"
+ports:
+  - 27015
