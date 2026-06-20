@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.5.3",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Logging und Verbose Logging Option + Log Viewer im Dashboard"
+  ]
+  },
+  {
   "version": "v0.1.5.2",
   "build_date": "2026-06-20",
   "changelog": [

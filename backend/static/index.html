@@ -25,8 +25,8 @@
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-bold text-orange-500 uppercase tracking-widest">📄 System Log & Troubleshooting</h2>
                     <div class="flex gap-4">
-                        <button @click="openLogViewer" class="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg font-bold transition cursor-pointer">Aktualisieren</button>
-                        <button @click="clearLogViewer" class="text-red-400 border border-red-900/50 bg-red-900/30 hover:bg-red-900 px-4 py-2 rounded-lg font-bold transition cursor-pointer">Leeren</button>
+                        <button @click="fetchSysLogs" class="text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg font-bold transition cursor-pointer">Aktualisieren</button>
+                        <button @click="clearSysLogs" class="text-red-400 border border-red-900/50 bg-red-900/30 hover:bg-red-900 px-4 py-2 rounded-lg font-bold transition cursor-pointer">Leeren</button>
                         <button @click="isLogViewerOpen = false" class="text-white bg-orange-600 hover:bg-orange-500 px-4 py-2 rounded-lg font-bold transition cursor-pointer">Schließen (X)</button>
                     </div>
                 </div>
@@ -548,7 +548,6 @@
 
         </main>
     </div>
-</div>
 
 <script>
     const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
@@ -556,8 +555,10 @@
     createApp({
         setup() {
             const uiModal = ref({ show: false, type: 'alert', title: '', message: '', inputVal: '', placeholder: '', resolve: null });
-            const logModal = ref({ show: false });
-            const sysLogs = ref([]);
+
+            // LOG VIEWER STATE
+            const isLogViewerOpen = ref(false);
+            const systemLogData = ref("Lade Logs...");
             const sysConfig = ref({ verbose_logging: false });
 
             const appAlert = (message, title="Information") => {
@@ -586,19 +587,33 @@
                 uiModal.value.show = false;
             };
 
-            const showSysLogs = async () => {
+            // LOG VIEWER METHODS
+            const fetchSysLogs = async () => {
                 try {
                     const res = await fetch('/api/system/logs');
                     if (res.ok) {
                         const data = await res.json();
-                        sysLogs.value = data.logs;
+                        systemLogData.value = data.logs || "Bisher keine Logs vorhanden.";
+                        setTimeout(() => {
+                            const el = document.getElementById('log-viewer-textarea');
+                            if(el) el.scrollTop = el.scrollHeight;
+                        }, 50);
                     }
-                } catch (e) {}
-                logModal.value.show = true;
-                setTimeout(() => {
-                    const el = document.getElementById('syslog-output');
-                    if(el) el.scrollTop = el.scrollHeight;
-                }, 50);
+                } catch(e) { systemLogData.value = "Logbuch konnte nicht geladen werden."; }
+            };
+
+            const openLogViewer = () => {
+                isLogViewerOpen.value = true;
+                systemLogData.value = "Lade Logs...";
+                fetchSysLogs();
+            };
+
+            const clearSysLogs = async () => {
+                if (!(await appConfirm("Möchtest du das gesamte Logbuch unwiderruflich leeren?", "Logs leeren"))) return;
+                try {
+                    await fetch('/api/system/logs/clear', { method: 'POST' });
+                    await fetchSysLogs();
+                } catch(e) {}
             };
 
             const fetchSysConfig = async () => {
@@ -615,6 +630,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(sysConfig.value)
                     });
+                    appAlert("Die Logging-Einstellungen wurden gespeichert.", "System");
                 } catch(e) {}
             };
 
@@ -1041,7 +1057,8 @@
             onUnmounted(() => { clearInterval(statsInterval); });
 
             return {
-                uiModal, resolveModal, logModal, sysLogs, showSysLogs, sysConfig, saveSysConfig,
+                uiModal, resolveModal,
+                isLogViewerOpen, systemLogData, openLogViewer, clearSysLogs, fetchSysLogs, sysConfig, saveSysConfig,
                 currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
                 serverStats, systemServiceStats, installedPlugins, availablePlugins, backupList, configData, listData, networkData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
                 systemInfo, showUpdateModal, isSystemUpdating, isReconnecting, systemUpdateAvailable, triggerSystemUpdate, checkGameUpdate,

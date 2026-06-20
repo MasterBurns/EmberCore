@@ -156,7 +156,7 @@ backup_manager = BackupManager(base_dir=EXE_DIR)
 config_manager = ConfigManager()
 
 # =========================================================================
-# STATELESS PROCESS RECOVERY (Adoptiert verwaiste Prozesse automatisch)
+# STATELESS PROCESS RECOVERY
 # =========================================================================
 class DummyStream:
     def write(self, *args, **kwargs): pass
@@ -173,11 +173,9 @@ class AdoptedProcess:
 
     def poll(self):
         try:
-            if self.ps.is_running() and self.ps.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
-                return None
+            if self.ps.is_running() and self.ps.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]: return None
             return 0
-        except psutil.NoSuchProcess:
-            return 0
+        except psutil.NoSuchProcess: return 0
 
     def wait(self, timeout=None):
         try: self.ps.wait(timeout)
@@ -191,8 +189,7 @@ class AdoptedProcess:
             self.ps.kill()
         except: pass
 
-    def terminate(self):
-        self.kill()
+    def terminate(self): self.kill()
 
 def get_server_processes(plugin_id: str):
     target_procs = {}
@@ -208,9 +205,8 @@ def get_server_processes(plugin_id: str):
                 parent_proc = psutil.Process(manager.processes[plugin_id].pid)
                 if parent_proc.is_running() and parent_proc.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
                     target_procs[parent_proc.pid] = parent_proc
-                    for child in parent_proc.children(recursive=True):
-                        target_procs[child.pid] = child
-                    return target_procs  # FAST PATH! Spart extrem viel CPU
+                    for child in parent_proc.children(recursive=True): target_procs[child.pid] = child
+                    return target_procs
                 else:
                     if verbose: logger.debug(f"[Recovery] PID {manager.processes[plugin_id].pid} im Cache ist tot.")
                     del manager.processes[plugin_id]
@@ -248,7 +244,6 @@ def get_server_processes(plugin_id: str):
                         match_reason = f"CWD ({cwd_path})"
 
                 if not matched and cmdline:
-                    # FIX: Keine stummen Crashes mehr durch None-Werte in der cmdline Liste!
                     cmd_safe = [str(x) for x in cmdline if x is not None]
                     cmd_str = " ".join(cmd_safe).lower()
                     if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str:
@@ -263,10 +258,8 @@ def get_server_processes(plugin_id: str):
                     for child in proc.children(recursive=True):
                         try: target_procs[child.pid] = child
                         except: pass
-            except psutil.AccessDenied:
-                pass # Access denied ist normal für System-Prozesse
-            except Exception as e:
-                pass
+            except (psutil.AccessDenied, psutil.NoSuchProcess): pass
+            except Exception as e: pass
 
         if verbose and matched_count > 0:
             logger.debug(f"[Recovery] Scan beendet. {scanned} PIDs gescannt. {matched_count} Haupt-Treffer gefunden.")
@@ -283,10 +276,8 @@ def is_server_online(plugin_id: str) -> bool:
             logger.info(f"[Recovery] Server '{plugin_id}' wurde im Hintergrund entdeckt und adoptiert! (PID: {main_pid})")
         return True
     else:
-        if plugin_id in manager.processes:
-            del manager.processes[plugin_id]
+        if plugin_id in manager.processes: del manager.processes[plugin_id]
         return False
-# =========================================================================
 
 def parse_live_config_file(file_path: str) -> dict:
     values = {}
@@ -555,8 +546,9 @@ def load_manifest(plugin_id: str):
     if not os.path.exists(manifest_path): return None
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
 
-# --- SYSTEM & LOGGING API ---
-
+# =========================================================================
+# SYSTEM & LOGGING API
+# =========================================================================
 @app.get("/api/system/settings")
 def get_sys_settings():
     return sys_config
@@ -594,6 +586,7 @@ def clear_sys_logs():
 @app.get("/api/system/health")
 def system_health():
     return {"status": "ok"}
+# =========================================================================
 
 @app.get("/api/system/service/status")
 def system_service_status():
@@ -1412,7 +1405,6 @@ def main():
     while socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('127.0.0.1', port)) == 0: port += 10
     ACTIVE_PORT = port
 
-    # Reduziert Uvicorn Log-Spam, wenn Verbose deaktiviert ist
     log_config = uvicorn.config.LOGGING_CONFIG
     if not sys_config.get("verbose_logging"):
         log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
