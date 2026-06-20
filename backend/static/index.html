@@ -48,7 +48,7 @@
                         class="w-full p-3 rounded-xl border text-center font-bold text-lg transition flex items-center justify-center space-x-2 shadow-md cursor-pointer"
                     >
                         <span>➕</span>
-                        <span class="text-sm tracking-wide uppercase">Plugins abonnieren</span>
+                        <span class="text-sm tracking-wide uppercase">Server hinzufügen</span>
                     </button>
                 </div>
             </aside>
@@ -57,10 +57,27 @@
 
                 <div v-if="currentView === 'marketplace'" class="max-w-4xl mx-auto space-y-6">
                     <div>
-                        <h1 class="text-2xl font-black text-white tracking-tight">EmberCore Plugin Marktplatz</h1>
-                        <p class="text-sm text-gray-400">Erweitere dein System per Klick direkt aus dem GitHub-Repository</p>
+                        <h1 class="text-2xl font-black text-white tracking-tight">Neuen Server hinzufügen</h1>
+                        <p class="text-sm text-gray-400">Wähle eine Server-Engine aus der Cloud aus, um eine neue Instanz zu erstellen.</p>
                     </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div v-for="plugin in availablePlugins" :key="plugin.id" class="bg-gray-950 rounded-xl border border-gray-900 p-5 flex flex-col justify-between shadow-xl transition hover:border-gray-800">
+                            <div class="space-y-3">
+                                <div class="flex justify-between items-start">
+                                    <span class="text-[10px] bg-orange-950/60 text-orange-400 border border-orange-900/40 px-2 py-0.5 rounded font-bold uppercase tracking-wider">{{ plugin.category }}</span>
+                                    <span class="text-xs text-gray-600 font-mono">v{{ plugin.version }}</span>
+                                </div>
+                                <h3 class="text-lg font-bold text-white">{{ plugin.name }}</h3>
+                                <p class="text-xs text-gray-400 leading-relaxed">{{ plugin.description }}</p>
+                            </div>
+                            <div class="mt-6 border-t border-gray-900 pt-4">
+                                <button @click="subscribePlugin(plugin)" :disabled="isSubscribing === plugin.id" class="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-gray-900 disabled:text-gray-500 text-white font-medium p-2 rounded-lg transition cursor-pointer text-sm">
+                                    {{ isSubscribing === plugin.id ? '⏳ Herunterladen...' : '➕ Server erstellen' }}
+                                </button>
+                            </div>
+                        </div>
                     </div>
+                </div>
 
                 <div v-if="currentView === 'server'" class="max-w-4xl mx-auto space-y-6">
 
@@ -90,6 +107,11 @@
                             <button @click="installServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">📦 Installieren / Update</button>
                             <button @click="startServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-green-600 hover:bg-green-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">▶️ Server Starten</button>
                             <button @click="stopServer" :disabled="isActionLoading || serverStats.status === 'offline'" class="bg-red-600 hover:bg-red-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">⏹️ Server Stoppen</button>
+                        </div>
+
+                        <div v-if="isActionLoading" class="bg-gray-950 border border-gray-900 p-4 rounded-xl flex items-center space-x-3 text-sm text-gray-400">
+                            <div class="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent"></div>
+                            <p>{{ loadingMessage }}</p>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -134,23 +156,15 @@
                         </div>
                     </div>
 
-                    <div v-if="serverTab === 'console'" class="bg-gray-950 rounded-xl border border-gray-900 shadow-md flex flex-col h-[600px] overflow-hidden">
+                    <div v-if="serverTab === 'console'" class="bg-gray-950 rounded-xl border border-gray-900 shadow-md flex flex-col h-[500px] overflow-hidden">
                         <div class="p-4 border-b border-gray-900 flex justify-between items-center bg-gray-900/80">
                             <div>
                                 <h3 class="text-sm font-bold text-white uppercase tracking-wider">📟 Live Terminal</h3>
-                                <p class="text-xs text-gray-500">Direkter stdout des Prozesses (hilfreich bei Mods/Abstürzen)</p>
+                                <p class="text-xs text-gray-500">Direkter stdout des Prozesses</p>
                             </div>
-                            <span v-if="serverStats.status === 'online'" class="text-xs font-bold text-green-400 animate-pulse flex items-center gap-2">
-                                <span class="h-2 w-2 rounded-full bg-green-400"></span> Live Stream
-                            </span>
-                            <span v-else class="text-xs font-bold text-red-500 flex items-center gap-2">
-                                <span class="h-2 w-2 rounded-full bg-red-500"></span> Offline
-                            </span>
                         </div>
-                        <div class="flex-1 p-4 overflow-y-auto font-mono text-xs text-gray-300 leading-relaxed bg-[#0a0a0a]" id="console-output">
+                        <div class="flex-1 p-4 overflow-y-auto font-mono text-xs text-gray-300 bg-[#0a0a0a]" id="console-output">
                             <div v-for="(log, idx) in consoleLogs" :key="idx" class="whitespace-pre-wrap">{{ log }}</div>
-                            <div v-if="consoleLogs.length === 0 && serverStats.status === 'online'" class="text-gray-600 italic">Warte auf Server-Output...</div>
-                            <div v-if="serverStats.status === 'offline' && consoleLogs.length === 0" class="text-gray-600 italic">Server ist offline. Keine Logs verfügbar.</div>
                         </div>
                     </div>
 
@@ -163,7 +177,7 @@
                             </div>
                             <button @click="saveConfig" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium p-2.5 rounded-lg transition shadow-md mt-4 cursor-pointer text-sm">💾 Einstellungen speichern</button>
                         </div>
-                        <p v-else class="text-gray-500 text-sm text-center py-6">Dieses Plugin besitzt keine editierbaren Web-Konfigurationen.</p>
+                        <p v-else class="text-gray-500 text-sm text-center py-6">Dieses Profil besitzt keine editierbaren Web-Konfigurationen.</p>
                     </div>
 
                     <div v-if="serverTab === 'backups'" class="space-y-6">
@@ -172,7 +186,7 @@
                             <div class="flex justify-between items-center border-b border-gray-900 pb-3">
                                 <div>
                                     <h3 class="text-sm font-bold text-white uppercase tracking-wider">🛡️ Speicherplatz-Optimierung</h3>
-                                    <p class="text-xs text-gray-500">Regelt das automatische Löschen von Backups (GFS Rotation).</p>
+                                    <p class="text-xs text-gray-500">Regelt das automatische Löschen von Backups.</p>
                                 </div>
                                 <button @click="saveBackupSettings" class="bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold px-4 py-2 rounded-lg text-gray-300 transition cursor-pointer">Speichern</button>
                             </div>
@@ -181,22 +195,47 @@
                                 <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
                                     <div>
                                         <p class="text-sm font-bold text-white">Letzte Backups immer behalten</p>
-                                        <p class="text-xs text-gray-500">Hebt exakt diese Anzahl an neuesten Speicherständen auf.</p>
                                     </div>
                                     <div class="flex items-center space-x-2">
                                         <input type="number" v-model.number="backupSchedule.retention.keep_latest" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
                                         <span class="text-xs text-gray-400 w-12">Stück</span>
                                     </div>
                                 </div>
+                                <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                                    <div>
+                                        <p class="text-sm font-bold text-white">Tägliche Backups aufheben</p>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <input type="number" v-model.number="backupSchedule.retention.keep_daily" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
+                                        <span class="text-xs text-gray-400 w-12">Tage</span>
+                                    </div>
                                 </div>
+                                <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                                    <div>
+                                        <p class="text-sm font-bold text-white">Wöchentliche Backups aufheben</p>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <input type="number" v-model.number="backupSchedule.retention.keep_weekly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
+                                        <span class="text-xs text-gray-400 w-12">Wochen</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                                    <div>
+                                        <p class="text-sm font-bold text-white">Monatliche Backups aufheben</p>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <input type="number" v-model.number="backupSchedule.retention.keep_monthly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
+                                        <span class="text-xs text-gray-400 w-12">Monate</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                             <div>
                                 <h3 class="text-sm font-bold text-white uppercase tracking-wider">⏱️ Automatisierungs-Pläne</h3>
-                                <p class="text-xs text-gray-500">Definiere Intervalle oder feste Uhrzeiten für automatische Backups</p>
+                                <p class="text-xs text-gray-500">Definiere beliebig viele Intervalle oder feste Uhrzeiten für automatische Backups</p>
                             </div>
-
                             <div class="space-y-2">
                                 <div v-for="(sched, index) in backupSchedule.schedules" :key="index" class="flex justify-between items-center bg-gray-900 border border-gray-800 p-2 rounded-lg">
                                     <span class="text-sm text-gray-300">
@@ -240,6 +279,9 @@
                                             <button @click="deleteBackup(bak.filename)" class="bg-gray-900 hover:bg-red-950 border border-gray-800 text-gray-400 hover:text-red-400 px-2 py-1 rounded transition cursor-pointer">🗑️ Löschen</button>
                                         </td>
                                     </tr>
+                                    <tr v-if="backupList.length === 0">
+                                        <td colspan="3" class="p-6 text-center text-gray-600">Noch keine Backups vorhanden.</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -255,18 +297,20 @@
 
         createApp({
             setup() {
-                const currentView = ref("server");
+                const currentView = ref("server"); // "server" oder "marketplace"
                 const serverTab = ref("status");
                 const selectedPlugin = ref("hlds_test");
 
                 const isActionLoading = ref(false);
                 const isSubscribing = ref(null);
+                const loadingMessage = ref("");
 
                 const serverStats = ref({ status: "offline", cpu_percent: 0, ram_mb: 0, disk: null });
                 const installedPlugins = ref([]);
+                const availablePlugins = ref([]);
                 const backupList = ref([]);
                 const configData = ref({ enabled: false, fields: [], values: {} });
-                const consoleLogs = ref([]); // NEU: Speichert Live Logs
+                const consoleLogs = ref([]);
 
                 const backupSchedule = ref({ schedules: [], retention: {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3} });
                 const newSchedType = ref("daily");
@@ -289,24 +333,29 @@
 
                 const loadInstalledPlugins = async () => {
                     const res = await fetch('/api/plugins/installed');
-                    if (res.ok) installedPlugins.value = await res.json();
+                    if (res.ok) {
+                        installedPlugins.value = await res.json();
+                        // Wenn der Server gelöscht wurde und nicht mehr in der Liste ist -> ab zum Marketplace
+                        if (selectedPlugin.value && !installedPlugins.value.find(p => p.id === selectedPlugin.value)) {
+                            openMarketplace();
+                        }
+                    }
                 };
 
                 const fetchStats = async () => {
+                    if (!selectedPlugin.value || currentView.value === 'marketplace') return;
                     try {
                         const res = await fetch(`/api/server/stats/${selectedPlugin.value}`);
                         if (res.ok) {
                             serverStats.value = await res.json();
                             loadInstalledPlugins();
                         }
-                        // NEU: Live-Logs abrufen, wenn der Tab aktiv ist
                         if (serverTab.value === 'console' && serverStats.value.status === 'online') {
                             const logRes = await fetch(`/api/server/logs/${selectedPlugin.value}`);
                             if (logRes.ok) {
                                 const logData = await logRes.json();
                                 const oldLen = consoleLogs.value.length;
                                 consoleLogs.value = logData.logs;
-                                // Auto-Scroll nach unten, wenn neue Zeilen kamen
                                 if (logData.logs.length !== oldLen) {
                                     setTimeout(() => {
                                         const el = document.getElementById('console-output');
@@ -335,15 +384,6 @@
                     if (res.ok) configData.value = await res.json();
                 };
 
-                const saveConfig = async () => {
-                    await fetch(`/api/server/config/${selectedPlugin.value}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(configData.value.values)
-                    });
-                    loadInstalledPlugins();
-                };
-
                 const openBackupTab = () => {
                     serverTab.value = 'backups';
                     fetchBackups();
@@ -359,7 +399,6 @@
                     const res = await fetch(`/api/server/backup/schedule/${selectedPlugin.value}`);
                     if (res.ok) {
                         const data = await res.json();
-                        // DER WICHTIGE BUGFIX FÜR ALTE (LEGACY) KONFIGS:
                         if (!data.schedules) data.schedules = [];
                         if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3};
                         backupSchedule.value = data;
@@ -392,12 +431,12 @@
                 };
 
                 const restoreBackup = async (filename) => {
-                    if (!confirm(`Backup '${filename}' einspielen?`)) return;
+                    if (!confirm(`Backup '${filename}' wirklich einspielen?`)) return;
                     await fetch(`/api/server/backup/restore/${selectedPlugin.value}/${filename}`, { method: 'POST' });
                 };
 
                 const deleteBackup = async (filename) => {
-                    if (!confirm(`Löschen?`)) return;
+                    if (!confirm(`Dieses Backup dauerhaft löschen?`)) return;
                     await fetch(`/api/server/backup/delete/${selectedPlugin.value}/${filename}`, { method: 'DELETE' });
                     fetchBackups();
                 };
@@ -418,15 +457,61 @@
 
                 const openLocalFolder = () => fetch(`/api/server/open-folder/${selectedPlugin.value}`, { method: 'POST' });
 
+                const openMarketplace = () => {
+                    currentView.value = "marketplace";
+                    selectedPlugin.value = null; // Markierung in der Seitenleiste aufheben
+                    fetch('/api/plugins/available').then(r => r.json()).then(d => availablePlugins.value = d).catch(() => {});
+                };
+
+                const subscribePlugin = async (plugin) => {
+                    isSubscribing.value = plugin.id;
+                    const res = await fetch(`/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}`, { method: 'POST' });
+                    const data = await res.json();
+                    alert(data.message || data.detail);
+                    isSubscribing.value = null;
+                    await loadInstalledPlugins();
+                    if(data.status === "success") selectServer(plugin.id);
+                };
+
+                const saveConfig = async () => {
+                    await fetch(`/api/server/config/${selectedPlugin.value}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(configData.value.values)
+                    });
+                    loadInstalledPlugins();
+                };
+
+                const installServer = async () => {
+                    isActionLoading.value = true;
+                    await fetch(`/api/server/install/${selectedPlugin.value}`, { method: 'POST' });
+                    isActionLoading.value = false;
+                    fetchStats();
+                };
+
+                // FIX: Server komplett löschen und sauber aus der Seitenleiste entfernen
+                const deleteServer = async () => {
+                    if (!confirm(`WARNUNG:\nMöchtest du den Server '${currentServerData.value.server_name}' samt Backups KOMPLETT von der Festplatte löschen?`)) return;
+                    const res = await fetch(`/api/server/delete/${selectedPlugin.value}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    alert(data.message || data.detail);
+                    if(data.status === "success" || res.ok) {
+                        openMarketplace();
+                        loadInstalledPlugins();
+                    }
+                };
+
                 onMounted(() => {
                     loadInstalledPlugins();
+                    openMarketplace(); // Startet standardmäßig in der Erstellen-Ansicht
                     statsInterval = setInterval(fetchStats, 2000);
                 });
                 onUnmounted(() => { clearInterval(statsInterval); });
 
                 return {
-                    currentView, serverTab, selectedPlugin, serverStats, installedPlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs,
-                    selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer
+                    currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
+                    serverStats, installedPlugins, availablePlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs,
+                    selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin
                 };
             }
         }).mount('#app');

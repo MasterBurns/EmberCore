@@ -1,29 +1,20 @@
 [
   {
+    "id": "hlds_test",
+    "name": "Half-Life Dedicated Server",
+    "category": "Shooter",
+    "version": "1.0.1",
+    "developer": "EmberCore Team",
+    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/hlds_test.zip",
+    "description": "Klassischer GoldSrc-Server. Leichtgewichtig und optimal für Crossfire-Deathmatches."
+  },
+  {
     "id": "conan_exiles",
-    "name": "Conan Exiles",
+    "name": "Conan Exiles Dedicated Server",
     "category": "Survival",
     "version": "1.0.0",
     "developer": "MasterBurns",
     "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/conan_exiles.zip",
-    "description": "Dedicated Server Modul für Conan Exiles. Unterstützt Wine-Emulation unter Linux (CachyOS tested) und nativen Start unter Windows."
-  },
-  {
-    "id": "palworld",
-    "name": "Palworld",
-    "category": "Survival",
-    "version": "1.0.2",
-    "developer": "Community",
-    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/palworld.zip",
-    "description": "Automatisierte Verwaltung für Palworld Dedicated Server inklusive Optimierungen für RAM-Housekeeping."
-  },
-  {
-    "id": "minecraft_paper",
-    "name": "Minecraft (Paper)",
-    "category": "Sandbox",
-    "version": "2.0.1",
-    "developer": "EmberCore Team",
-    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/minecraft_paper.zip",
-    "description": "Hochperformanter Minecraft-Server mit integrierter Java-Abhängigkeitsprüfung."
+    "description": "Vollwertiger Survival-Server (AppID: 443030). Beinhaltet automatische Datenbank-Sicherung und Konfigurations-Management."
   }
 ]

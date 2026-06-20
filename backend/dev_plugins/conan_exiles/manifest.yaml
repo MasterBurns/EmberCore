@@ -1,0 +1,32 @@
+name: "Conan Exiles Dedicated Server"
+id: "conan_exiles"
+category: "Survival"
+engine: "steamcmd"
+# AppID 443030 ist der dedizierte Server (nicht der normale Spielclient)
+steam_app_id: 443030
+executable_windows: "ConanSandboxServer.exe"
+default_args:
+  - "-log" # Zwingend erforderlich, damit der Server Logs für unsere Konsole ausspuckt
+ports:
+  - 7777  # Game Port
+  - 27015 # Steam Query Port
+backup:
+  # Sichert die komplette SQLite-Datenbank und die Logs
+  source_path: "ConanSandbox/Saved"
+config_meta:
+  # Der Standardpfad für die Conan Server-Konfiguration
+  file_path: "ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini"
+  format: "key_value"
+  fields:
+    - key: "ServerName"
+      label: "Server-Name"
+      type: "text"
+      default: "EmberCore Conan Server"
+    - key: "MaxPlayers"
+      label: "Maximale Spieleranzahl"
+      type: "number"
+      default: 40
+    - key: "ServerPassword"
+      label: "Server-Passwort (leer = öffentlich)"
+      type: "text"
+      default: ""

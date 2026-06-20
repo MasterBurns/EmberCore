@@ -7,10 +7,9 @@ class BackupScheduler:
     def __init__(self, base_dir, backup_manager):
         self.base_dir = base_dir
         self.backup_manager = backup_manager
-        self.plugins_dir = os.path.join(self.base_dir, "plugins")
 
     async def start_loop(self):
-        print("[*] EmberCore Backup-Zeitplaner (Multi-Schedule) gestartet.")
+        print("[*] EmberCore Backup-Zeitplaner (Multi-Schedule-Safe) gestartet.")
         while True:
             try:
                 await self._check_and_run_backups()
@@ -19,13 +18,18 @@ class BackupScheduler:
             await asyncio.sleep(60)
 
     async def _check_and_run_backups(self):
-        if not os.path.exists(self.plugins_dir): return
+        # Erfasse alle eindeutigen Plugin-IDs aus beiden Verzeichnissen
+        plugin_ids = set()
+        for folder in ["plugins", "dev_plugins"]:
+            p_dir = os.path.join(self.base_dir, folder)
+            if os.path.exists(p_dir):
+                for p_id in os.listdir(p_dir):
+                    if os.path.isdir(os.path.join(p_dir, p_id)):
+                        plugin_ids.add(p_id)
 
-        for plugin_id in os.listdir(self.plugins_dir):
-            plugin_path = os.path.join(self.plugins_dir, plugin_id)
-            if not os.path.isdir(plugin_path): continue
-
-            schedule_file = os.path.join(plugin_path, "backup_schedule.json")
+        for plugin_id in plugin_ids:
+            # Zeitpläne liegen jetzt im geschützten, neutralen data-Ordner
+            schedule_file = os.path.join(self.base_dir, "data", plugin_id, "backup_schedule.json")
             if not os.path.exists(schedule_file): continue
 
             with open(schedule_file, "r", encoding="utf-8") as f:
@@ -33,7 +37,6 @@ class BackupScheduler:
 
             schedules = config.get("schedules", [])
             retention = config.get("retention", {})
-
             now = datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
@@ -72,8 +75,11 @@ class BackupScheduler:
                     except: pass
 
             if backup_needed:
-                print(f"[+] Scheduler: Führe zeitgesteuertes Backup für '{plugin_id}' aus...")
-                manifest_path = os.path.join(plugin_path, "manifest.yaml")
+                # Finde das Manifest (Dev-Ordner hat Priorität)
+                manifest_path = os.path.join(self.base_dir, "dev_plugins", plugin_id, "manifest.yaml")
+                if not os.path.exists(manifest_path):
+                    manifest_path = os.path.join(self.base_dir, "plugins", plugin_id, "manifest.yaml")
+
                 if os.path.exists(manifest_path):
                     import yaml
                     with open(manifest_path, "r", encoding="utf-8") as mf:
@@ -84,5 +90,6 @@ class BackupScheduler:
                         self.backup_manager.create_backup(plugin_id, server_dir, backup_config.get("source_path"), retention)
 
             if schedules_updated:
+                os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
                 with open(schedule_file, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=2)
