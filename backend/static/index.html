@@ -6,7 +6,7 @@
     <title>EmberCore Infrastructure Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔥</text></svg>">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0b0f19; color: #f3f4f6; font-family: ui-sans-serif, system-ui, sans-serif; }
         ::-webkit-scrollbar { width: 8px; }
@@ -204,6 +204,12 @@
                             <button @click="openConfigTab" :class="serverTab === 'config' ? 'bg-orange-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-900 hover:text-white'" class="w-full text-left px-4 py-2.5 rounded-lg font-medium transition cursor-pointer text-sm flex items-center gap-3">
                                 ⚙️ Einstellungen
                             </button>
+                            <button @click="openListsTab" :class="serverTab === 'lists' ? 'bg-orange-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-900 hover:text-white'" class="w-full text-left px-4 py-2.5 rounded-lg font-medium transition cursor-pointer text-sm flex items-center gap-3">
+                                📜 Listen
+                            </button>
+                            <button @click="openNetworkTab" :class="serverTab === 'network' ? 'bg-orange-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-900 hover:text-white'" class="w-full text-left px-4 py-2.5 rounded-lg font-medium transition cursor-pointer text-sm flex items-center gap-3">
+                                🌐 Netzwerk
+                            </button>
                             <button @click="openModsTab" :class="serverTab === 'mods' ? 'bg-orange-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-900 hover:text-white'" class="w-full text-left px-4 py-2.5 rounded-lg font-medium transition cursor-pointer text-sm flex items-center gap-3">
                                 🔌 Mods
                             </button>
@@ -237,7 +243,7 @@
                                     <button @click="installServer" :disabled="isActionLoading || serverStats.status === 'online'"
                                         :class="(serverStats.update_info && serverStats.update_info.available) ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.5)] border border-orange-400' : 'bg-blue-600 hover:bg-blue-500 border border-transparent'"
                                         class="disabled:bg-gray-950 disabled:border-gray-900 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition cursor-pointer text-sm flex flex-col items-center justify-center text-center">
-                                        <span>{{ (serverStats.update_info && serverStats.update_info.available) ? '🔄 Update verfügbar' : '📦 Installieren / Update' }}</span>
+                                        <span>{{ (serverStats.update_info && serverStats.update_info.available) ? '🔄 Update verfügbar' : '📦 Install / Update' }}</span>
                                     </button>
                                     <button @click="checkGameUpdate" :disabled="isActionLoading" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm border border-gray-700">
                                         🔎 Update prüfen
@@ -335,6 +341,53 @@
                                 <p v-else class="text-gray-500 text-sm text-center py-6">Dieses Profil besitzt keine editierbaren Web-Konfigurationen.</p>
                             </div>
 
+                            <div v-if="serverTab === 'lists'" class="space-y-6">
+                                <div v-if="!listData.enabled" class="bg-gray-950 rounded-xl p-8 border border-gray-900 text-center text-gray-500 text-sm shadow-md">
+                                    Dieses Spiel unterstützt noch keine Textlisten im Webinterface.
+                                </div>
+                                <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div v-for="lst in listData.lists" :key="lst.id" class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md flex flex-col h-96">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <h3 class="text-sm font-bold text-white uppercase">{{ lst.name }}</h3>
+                                            <button @click="saveList(lst)" class="bg-orange-600 hover:bg-orange-500 text-white text-[10px] font-bold px-3 py-1.5 rounded cursor-pointer transition">SPEICHERN</button>
+                                        </div>
+                                        <p class="text-[10px] text-gray-500 font-mono mb-3 uppercase tracking-wide">Ein Eintrag pro Zeile (z.B. SteamID)</p>
+                                        <textarea v-model="lst.content" class="flex-1 w-full bg-[#0a0a0a] border border-gray-800 rounded p-3 text-xs text-gray-300 font-mono focus:border-orange-500 outline-none resize-none whitespace-pre"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="serverTab === 'network'" class="space-y-6">
+                                <div class="bg-gray-950 rounded-xl p-6 border border-gray-900 shadow-md space-y-4">
+                                    <div>
+                                        <h3 class="text-lg font-black text-white uppercase tracking-wider">🌍 Netzwerk-Ports & Freigaben</h3>
+                                        <p class="text-sm text-gray-400 mt-1">Damit das Spiel aus dem Internet erreichbar ist, müssen die Ports deines PCs (Firewall) und deines Routers (Portweiterleitung) geöffnet sein.</p>
+                                    </div>
+
+                                    <div v-if="!networkData.enabled" class="text-gray-500 text-sm py-4 border-t border-gray-900">Keine Ports für dieses Spiel im Manifest konfiguriert.</div>
+                                    <div v-else class="space-y-6 border-t border-gray-900 pt-4">
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <div v-for="port in networkData.ports" :key="port.port" class="bg-gray-900 border border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-inner">
+                                                <div>
+                                                    <p class="text-xs text-gray-500 font-bold uppercase tracking-wide">{{ port.desc }}</p>
+                                                    <p class="text-2xl font-mono text-white font-bold mt-1">{{ port.port }}</p>
+                                                </div>
+                                                <span class="text-[10px] bg-orange-950/60 text-orange-400 border border-orange-900 px-2 py-1 rounded uppercase font-bold">{{ port.protocol }}</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="bg-gray-900/40 p-4 rounded-xl border border-gray-800 mt-4">
+                                            <div class="flex justify-between items-center mb-3 border-b border-gray-800 pb-3">
+                                                <h4 class="text-white font-bold text-sm">🛡️ Automatische Router- & Firewall-Freigabe</h4>
+                                                <button @click="triggerNetworkSetup" :disabled="isActionLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded shadow cursor-pointer transition">Freigabe ausführen</button>
+                                            </div>
+                                            <p class="text-xs text-gray-400 mb-2">EmberCore trägt die Ports in der <b>Windows Defender Firewall</b> ein und funkt parallel deinen <b>Router (z.B. FritzBox) über UPnP an</b>, um die Internetleitung zu öffnen.</p>
+                                            <p class="text-[10px] text-orange-400 font-bold mt-2 bg-orange-950/30 p-2 rounded">WICHTIG: Erfordert danach den Klick auf "Ja" im Windows Administrator-Fenster (Schild-Symbol). UPnP muss im Router aktiviert sein!</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div v-if="serverTab === 'mods'" class="space-y-6">
                                 <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                                     <div><h3 class="text-sm font-bold text-white uppercase tracking-wider">🔌 Steam Workshop Modifikationen</h3></div>
@@ -369,20 +422,20 @@
                                     </div>
                                     <div class="space-y-3 pt-2">
                                         <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                            <div><p class="text-sm font-bold text-white">Letzte Backups immer behalten</p></div>
-                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_latest" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono"><span class="text-xs text-gray-400 w-12">Stück</span></div>
+                                            <div><p class="text-sm font-bold text-white">Letzte Backups immer behalten (Sicherheitsnetz)</p><p class="text-[10px] text-gray-500 mt-1">Löscht niemals die neuesten X Sicherungen, egal wie alt sie sind.</p></div>
+                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_latest" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono focus:border-orange-500 outline-none"><span class="text-xs text-gray-400 w-12">Stück</span></div>
                                         </div>
                                         <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                            <div><p class="text-sm font-bold text-white">Tägliche Backups aufheben</p></div>
-                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_daily" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono"><span class="text-xs text-gray-400 w-12">Tage</span></div>
+                                            <div><p class="text-sm font-bold text-white">Tägliche Backups aufheben (Tage)</p><p class="text-[10px] text-gray-500 mt-1">Archiviert das allererste Backup jedes Tages für die nächsten X Tage.</p></div>
+                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_daily" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono focus:border-orange-500 outline-none"><span class="text-xs text-gray-400 w-12">Tage</span></div>
                                         </div>
                                         <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                            <div><p class="text-sm font-bold text-white">Wöchentliche Backups aufheben</p></div>
-                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_weekly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono"><span class="text-xs text-gray-400 w-12">Wochen</span></div>
+                                            <div><p class="text-sm font-bold text-white">Wöchentliche Backups aufheben (Wochen)</p><p class="text-[10px] text-gray-500 mt-1">Archiviert das erste Backup jeder Woche für die nächsten X Wochen.</p></div>
+                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_weekly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono focus:border-orange-500 outline-none"><span class="text-xs text-gray-400 w-12">Wochen</span></div>
                                         </div>
                                         <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                            <div><p class="text-sm font-bold text-white">Monatliche Backups aufheben</p></div>
-                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_monthly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono"><span class="text-xs text-gray-400 w-12">Monate</span></div>
+                                            <div><p class="text-sm font-bold text-white">Monatliche Backups aufheben (Monate)</p><p class="text-[10px] text-gray-500 mt-1">Archiviert das erste Backup jedes Monats für die nächsten X Monate.</p></div>
+                                            <div class="flex items-center space-x-2"><input type="number" v-model.number="backupSchedule.retention.keep_monthly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono focus:border-orange-500 outline-none"><span class="text-xs text-gray-400 w-12">Monate</span></div>
                                         </div>
                                     </div>
                                 </div>
@@ -413,18 +466,19 @@
                                     <table class="w-full text-left border-collapse">
                                         <thead>
                                             <tr class="bg-gray-900/40 border-b border-gray-900 text-gray-500 text-[10px] uppercase font-bold">
-                                                <th class="p-3">Dateiname</th><th class="p-3">Größe</th><th class="p-3 text-right">Aktionen</th>
+                                                <th class="p-3">Dateiname</th><th class="p-3 text-right">Größe</th><th class="p-3 text-right">Aktionen</th>
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-gray-900 text-xs text-gray-300">
                                             <tr v-for="bak in backupList" :key="bak.filename" class="hover:bg-gray-900/20">
                                                 <td class="p-3 font-mono text-orange-400/80">{{ bak.filename }}</td>
-                                                <td class="p-3 text-blue-400 font-semibold">{{ bak.size_mb }} MB</td>
+                                                <td class="p-3 text-blue-400 font-semibold text-right">{{ bak.size_mb }} MB</td>
                                                 <td class="p-3 text-right space-x-1">
                                                     <button @click="restoreBackup(bak.filename)" class="bg-gray-900 hover:bg-green-950 border border-gray-800 text-gray-400 hover:text-green-400 px-2 py-1 rounded transition cursor-pointer">↩️ Einspielen</button>
                                                     <button @click="deleteBackup(bak.filename)" class="bg-gray-900 hover:bg-red-950 border border-gray-800 text-gray-400 hover:text-red-400 px-2 py-1 rounded transition cursor-pointer">🗑️ Löschen</button>
                                                 </td>
                                             </tr>
+                                            <tr v-if="backupList.length === 0"><td colspan="3" class="p-6 text-center text-gray-600">Keine Backups vorhanden.</td></tr>
                                         </tbody>
                                     </table>
                                 </div>
@@ -458,6 +512,9 @@
                 const availablePlugins = ref([]);
                 const backupList = ref([]);
                 const configData = ref({ enabled: false, fields: [], unknown_fields: [], values: {} });
+                const listData = ref({ enabled: false, lists: [] });
+                const networkData = ref({ enabled: false, ports: [] });
+
                 const consoleLogs = ref([]);
                 const activeDiagnostics = ref([]);
                 const activeMods = ref([]);
@@ -704,6 +761,33 @@
                     }
                 };
 
+                const openListsTab = async () => {
+                    serverTab.value = 'lists';
+                    const res = await fetch(`/api/server/lists/${selectedPlugin.value}`);
+                    if (res.ok) listData.value = await res.json();
+                };
+
+                const saveList = async (lst) => {
+                    const payload = {}; payload[lst.id] = lst.content;
+                    await fetch(`/api/server/lists/${selectedPlugin.value}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    alert("Liste erfolgreich auf dem Server gespeichert.");
+                };
+
+                const openNetworkTab = async () => {
+                    serverTab.value = 'network';
+                    const res = await fetch(`/api/server/network/${selectedPlugin.value}`);
+                    if (res.ok) networkData.value = await res.json();
+                };
+
+                const triggerNetworkSetup = async () => {
+                    isActionLoading.value = true;
+                    loadingMessage.value = "Erstelle und sende Firewall/Router Anweisung...";
+                    const res = await fetch(`/api/server/network/setup/${selectedPlugin.value}`, { method: 'POST' });
+                    const data = await res.json();
+                    alert(data.message);
+                    isActionLoading.value = false;
+                };
+
                 const openModsTab = async () => { serverTab.value = 'mods'; fetchMods(); };
                 const fetchMods = async () => { const res = await fetch(`/api/server/mods/${selectedPlugin.value}`); if (res.ok) activeMods.value = await res.json(); };
                 const addMod = async () => {
@@ -813,9 +897,9 @@
 
                 return {
                     currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
-                    serverStats, systemServiceStats, installedPlugins, availablePlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
+                    serverStats, systemServiceStats, installedPlugins, availablePlugins, backupList, configData, listData, networkData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
                     systemInfo, showUpdateModal, isSystemUpdating, isReconnecting, systemUpdateAvailable, triggerSystemUpdate, checkGameUpdate,
-                    selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, openModsTab, fetchMods, addMod, deleteMod, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin, applyFix,
+                    selectServer, openConfigTab, openListsTab, saveList, openNetworkTab, triggerNetworkSetup, saveConfig, openBackupTab, openConsoleTab, openModsTab, fetchMods, addMod, deleteMod, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin, applyFix,
                     openSystemTab, installService, uninstallService, startService, stopService, formatUptime
                 };
             }

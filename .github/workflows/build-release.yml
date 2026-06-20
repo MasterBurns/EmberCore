@@ -44,7 +44,7 @@ jobs:
         [Setup]
         AppName=EmberCore
         AppVersion=$version
-        DefaultDirName={commonpf}\EmberCore
+        DefaultDirName=C:\EmberCore
         DefaultGroupName=EmberCore
         UninstallDisplayIcon={app}\EmberCore.exe
         Compression=lzma2
@@ -64,7 +64,7 @@ jobs:
         Name: "desktopicon"; Description: "Desktop-Symbol erstellen"; GroupDescription: "Zusätzliche Symbole:"
 
         [Run]
-        Filename: "{app}\EmberCore.exe"; Description: "EmberCore jetzt starten"; Flags: nowait postinstall skipifsilent
+        Filename: "{app}\EmberCore.exe"; Description: "EmberCore jetzt starten"; Flags: nowait postinstall skipifsilent runasoriginaluser
         "@
         Set-Content -Path installer.iss -Value $iss -Encoding UTF8
 

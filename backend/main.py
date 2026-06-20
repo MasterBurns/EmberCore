@@ -44,6 +44,30 @@ DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else
 ACTIVE_PORT = 8000
 START_TIME = datetime.now()
 
+# --- NEU: DAU-SCHUTZ (RECHTE-PRÜFUNG) ---
+def check_write_permissions():
+    try:
+        test_file = os.path.join(EXE_DIR, ".write_test")
+        with open(test_file, "w") as f: f.write("test")
+        os.remove(test_file)
+    except PermissionError:
+        print("\n" + "!"*65)
+        print(" [SCHWERER FEHLER] FEHLENDE SCHREIBRECHTE!")
+        print("!"*65)
+        print(" EmberCore darf in diesem Ordner keine Dateien speichern.")
+        print(f" Aktueller Pfad: {EXE_DIR}")
+        print("\n LOESUNG:")
+        print(" Verschiebe den EmberCore-Ordner aus 'Programme' / 'Program Files'")
+        print(" heraus an einen freigegebenen Ort, z.B. nach:")
+        print(" -> C:\\EmberCore\\  oder  D:\\Games\\EmberCore\\")
+        print("\n (Bitte starte das Tool aus Sicherheitsgruenden NICHT als Admin!)")
+        print("!"*65 + "\n")
+        # Fenster offen halten, damit der User den Fehler lesen kann, bevor es sich schließt
+        if platform.system() == "Windows": os.system("pause")
+        sys.exit(1)
+
+check_write_permissions()
+
 def get_launch_command(mode="normal"):
     cmd = [sys.executable] if IS_COMPILED else [sys.executable, os.path.abspath(sys.argv[0])]
     if mode == "watchdog": cmd.append("--watchdog")
@@ -960,6 +984,81 @@ def save_server_config(plugin_id: str, data: dict = Body(...)):
     if os.path.exists(live_path): apply_desired_config_to_live(plugin_id)
     return {"status": "success", "message": "Soll-Konfiguration gespeichert."}
 
+# --- NEU: LISTEN (WHITELISTS / BANS) ROUTEN ---
+@app.get("/api/server/lists/{plugin_id}")
+def get_server_lists(plugin_id: str):
+    manifest = load_manifest(plugin_id)
+    if not manifest or "lists_meta" not in manifest: return {"enabled": False, "lists": []}
+    result = []
+    for lst in manifest["lists_meta"]:
+        file_path = os.path.join(SERVERS_ROOT, plugin_id, lst["file_path"])
+        content = ""
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f: content = f.read()
+        result.append({"id": lst["id"], "name": lst["name"], "content": content})
+    return {"enabled": True, "lists": result}
+
+@app.post("/api/server/lists/{plugin_id}")
+def save_server_lists(plugin_id: str, payload: dict = Body(...)):
+    manifest = load_manifest(plugin_id)
+    if not manifest or "lists_meta" not in manifest: return {"status": "error"}
+    for lst in manifest["lists_meta"]:
+        list_id = lst["id"]
+        if list_id in payload:
+            file_path = os.path.join(SERVERS_ROOT, plugin_id, lst["file_path"])
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f: f.write(payload[list_id])
+    return {"status": "success", "message": "Listen gespeichert."}
+
+# --- NEU: NETZWERK ROUTEN (FIREWALL & UPNP) ---
+@app.get("/api/server/network/{plugin_id}")
+def get_network(plugin_id: str):
+    manifest = load_manifest(plugin_id)
+    if not manifest or "network_meta" not in manifest: return {"enabled": False, "ports": []}
+    return {"enabled": True, "ports": manifest["network_meta"].get("ports", [])}
+
+@app.post("/api/server/network/setup/{plugin_id}")
+def setup_network(plugin_id: str):
+    if platform.system() != "Windows":
+        return {"status": "error", "message": "Netzwerk-Automatisierung wird nur unter Windows unterstützt."}
+
+    manifest = load_manifest(plugin_id)
+    ports = manifest.get("network_meta", {}).get("ports", [])
+    if not ports: return {"status": "error", "message": "Keine Ports definiert."}
+
+    local_ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except: pass
+
+    ps_commands = ["Write-Host 'EmberCore konfiguriert Firewall & Router...'"]
+
+    # Firewall eintragen
+    for p in ports:
+        rule_name = f"EmberCore_{plugin_id}_{p['port']}_{p['protocol'].upper()}"
+        ps_commands.append(f"netsh advfirewall firewall delete rule name='{rule_name}' 2> $null")
+        ps_commands.append(f"netsh advfirewall firewall add rule name='{rule_name}' dir=in action=allow protocol={p['protocol']} localport={p['port']} 2> $null")
+
+    # UPnP Router Freigabe per Windows COM Objekt
+    ps_commands.append("$upnp = New-Object -ComObject HNetCfg.NATUPnP")
+    ps_commands.append("if ($upnp) { $map = $upnp.StaticPortMappingCollection; if ($map) {")
+    for p in ports:
+        rule_name = f"EmberCore_{plugin_id}_{p['port']}_{p['protocol'].upper()}"
+        ps_commands.append(f"  try {{ $map.Remove({p['port']}, '{p['protocol'].upper()}') }} catch {{}}")
+        ps_commands.append(f"  try {{ $map.Add({p['port']}, '{p['protocol'].upper()}', {p['port']}, '{local_ip}', $true, '{rule_name}') }} catch {{}}")
+    ps_commands.append("} }")
+    ps_commands.append("Write-Host 'Erfolgreich hinzugefuegt! Fenster schliesst sich in 3 Sekunden.'")
+    ps_commands.append("Start-Sleep -Seconds 3")
+
+    ps_script = os.path.join(EXE_DIR, "network_setup.ps1")
+    with open(ps_script, "w", encoding="utf-8") as f: f.write("\n".join(ps_commands))
+
+    subprocess.Popen(["powershell", "-Command", f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -File \"{ps_script}\"' -Verb RunAs"])
+    return {"status": "success", "message": "Bitte bestätige gleich die Windows-Sicherheitsabfrage (Schild-Symbol), um die Freigabe abzuschließen!"}
+
 @app.get("/api/server/backup/schedule/{plugin_id}")
 def get_backup_schedule(plugin_id: str):
     schedule_file = os.path.join(DATA_ROOT, plugin_id, "backup_schedule.json")
@@ -972,6 +1071,24 @@ def save_backup_schedule(plugin_id: str, req: dict = Body(...)):
     schedule_file = os.path.join(DATA_ROOT, plugin_id, "backup_schedule.json")
     os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
     with open(schedule_file, "w", encoding="utf-8") as f: json.dump(req, f, indent=2)
+    return {"status": "success"}
+
+@app.get("/api/server/backup/list/{plugin_id}")
+def list_backups(plugin_id: str): return backup_manager.list_backups(plugin_id)
+
+@app.post("/api/server/backup/create/{plugin_id}")
+def create_backup(plugin_id: str):
+    backup_manager.create_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), load_manifest(plugin_id).get("backup").get("source_path"), {})
+    return {"status": "success"}
+
+@app.post("/api/server/backup/restore/{plugin_id}/{filename}")
+def restore_backup(plugin_id: str, filename: str):
+    backup_manager.restore_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), load_manifest(plugin_id).get("backup").get("source_path"), filename)
+    return {"status": "success"}
+
+@app.delete("/api/server/backup/delete/{plugin_id}/{filename}")
+def delete_backup(plugin_id: str, filename: str):
+    backup_manager.delete_backup(plugin_id, filename)
     return {"status": "success"}
 
 @app.get("/api/plugins/available")
