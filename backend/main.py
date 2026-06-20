@@ -44,7 +44,7 @@ DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else
 ACTIVE_PORT = 8000
 START_TIME = datetime.now()
 
-# --- NEU: DAU-SCHUTZ (RECHTE-PRÜFUNG) ---
+# --- DAU-SCHUTZ (RECHTE-PRÜFUNG) ---
 def check_write_permissions():
     try:
         test_file = os.path.join(EXE_DIR, ".write_test")
@@ -62,7 +62,6 @@ def check_write_permissions():
         print(" -> C:\\EmberCore\\  oder  D:\\Games\\EmberCore\\")
         print("\n (Bitte starte das Tool aus Sicherheitsgruenden NICHT als Admin!)")
         print("!"*65 + "\n")
-        # Fenster offen halten, damit der User den Fehler lesen kann, bevor es sich schließt
         if platform.system() == "Windows": os.system("pause")
         sys.exit(1)
 
@@ -407,7 +406,7 @@ def load_manifest(plugin_id: str):
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
 
 
-# --- OS SERVICE & SYSTEM ROUTEN ---
+# --- OS SERVICE & SYSTEM ROUTEN (REPARIERT: PowerShell statt cmd.exe) ---
 
 @app.get("/api/system/health")
 def system_health():
@@ -428,8 +427,8 @@ def system_service_status():
             except: pass
     else:
         try:
-            out = subprocess.check_output(["schtasks", "/query", "/tn", "EmberCoreDaemon"], text=True, stderr=subprocess.DEVNULL)
-            installed = "EmberCoreDaemon" in out
+            out = subprocess.check_output(["powershell", "-Command", "(Get-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue) -ne $null"], text=True, stderr=subprocess.DEVNULL)
+            installed = "True" in out
             if installed:
                 running = any("--service" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
         except: pass
@@ -480,18 +479,23 @@ def install_system_service():
             return {"status": "success", "message": "EmberCore wurde als systemd-Service installiert!"}
         else:
             import ctypes
-            tr_val = f'\\"{sys.executable}\\" \\"{exe_path}\\" --service' if not IS_COMPILED else f'\\"{exe_path}\\" --service'
+            ps_script = os.path.join(EXE_DIR, "install_service.ps1")
+            executable = exe_path if IS_COMPILED else sys.executable
+            arguments = "--service" if IS_COMPILED else f"'{exe_path}' --service"
+
+            with open(ps_script, "w", encoding="utf-8") as f:
+                f.write(f"$action = New-ScheduledTaskAction -Execute '{executable}' -Argument \"{arguments}\"\n")
+                f.write("$trigger = New-ScheduledTaskTrigger -AtStartup\n")
+                f.write("$principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n")
+                f.write("Register-ScheduledTask -TaskName 'EmberCoreDaemon' -Action $action -Trigger $trigger -Principal $principal -Force\n")
+                f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                bat_path = os.path.join(EXE_DIR, "install_service.bat")
-                with open(bat_path, "w") as f:
-                    f.write(f'@echo off\nschtasks /Create /TN "EmberCoreDaemon" /TR "{tr_val}" /SC ONSTART /RU SYSTEM /RL HIGHEST /F\n')
-                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
-                return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service zu installieren!"}
+                return {"status": "info", "message": "Bitte bestätige jetzt das kleine Windows Administrator-Schild in der Taskleiste.\nEmberCore installiert sich dann selbst als Dienst und startet sofort!"}
             else:
-                cmd_create = f'schtasks /Create /TN "EmberCoreDaemon" /TR "{tr_val}" /SC ONSTART /RU SYSTEM /RL HIGHEST /F'
-                subprocess.run(cmd_create, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True, stdout=subprocess.DEVNULL)
                 return {"status": "success", "message": "EmberCore wurde erfolgreich als Windows Service installiert!"}
     except Exception as e:
         return {"status": "error", "message": f"Konnte Service nicht erstellen: {e}"}
@@ -514,16 +518,19 @@ def uninstall_system_service():
         except Exception as e: return {"status": "error", "message": str(e)}
     else:
         import ctypes
+        ps_script = os.path.join(EXE_DIR, "uninstall_service.ps1")
+        with open(ps_script, "w", encoding="utf-8") as f:
+            f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
+            f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
+            f.write(f"Get-WmiObject Win32_Process | Where-Object {{ $_.CommandLine -match '--service' -and $_.Name -eq '{os.path.basename(sys.executable)}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+
         if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-            bat_path = os.path.join(EXE_DIR, "uninstall_service.bat")
-            with open(bat_path, "w") as f:
-                f.write('@echo off\nschtasks /Delete /TN "EmberCoreDaemon" /F\n')
-            ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+            ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
             subprocess.run(["powershell", "-Command", ps_cmd])
-            return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service restlos zu entfernen!"}
+            return {"status": "info", "message": "Bitte bestätige jetzt die Administrator-Freigabe, um den Service restlos vom PC zu entfernen und zu stoppen."}
         else:
             try:
-                subprocess.run('schtasks /Delete /TN "EmberCoreDaemon" /F', shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True, stdout=subprocess.DEVNULL)
                 return {"status": "success", "message": "Windows Service erfolgreich entfernt."}
             except Exception as e: return {"status": "error", "message": "Konnte Dienst nicht löschen."}
 
@@ -536,14 +543,16 @@ def start_system_service():
             subprocess.run(["systemctl", "start", "embercore.service"])
         else:
             import ctypes
+            ps_script = os.path.join(EXE_DIR, "start_service.ps1")
+            with open(ps_script, "w", encoding="utf-8") as f:
+                f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
+
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                bat_path = os.path.join(EXE_DIR, "start_service.bat")
-                with open(bat_path, "w") as f:
-                    f.write('@echo off\nschtasks /Run /TN "EmberCoreDaemon"\n')
-                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
-            else: subprocess.run('schtasks /Run /TN "EmberCoreDaemon"', shell=True)
-        return {"status": "success", "message": "Service-Start wurde angefordert."}
+            else:
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
+        return {"status": "success", "message": "Service-Start wurde im Hintergrund angefordert."}
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @app.post("/api/system/service/stop")
@@ -555,16 +564,16 @@ def stop_system_service():
             subprocess.run(["systemctl", "stop", "embercore.service"])
         else:
             import ctypes
+            ps_script = os.path.join(EXE_DIR, "stop_service.ps1")
+            with open(ps_script, "w", encoding="utf-8") as f:
+                f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
+                f.write(f"Get-WmiObject Win32_Process | Where-Object {{ $_.CommandLine -match '--service' -and $_.Name -eq '{os.path.basename(sys.executable)}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                bat_path = os.path.join(EXE_DIR, "stop_service.bat")
-                with open(bat_path, "w") as f:
-                    f.write(f'@echo off\ntaskkill /F /IM "{os.path.basename(sys.executable)}" /FI "USERNAME eq NT AUTHORITY\\SYSTEM"\n')
-                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
             else:
-                for p in psutil.process_iter(['cmdline']):
-                    cmd = p.info.get('cmdline')
-                    if cmd and '--service' in cmd: p.kill()
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
         return {"status": "success", "message": "Service-Stopp wurde angefordert."}
     except Exception as e: return {"status": "error", "message": str(e)}
 
@@ -609,23 +618,26 @@ async def update_embercore():
             return {"status": "success", "message": "Neustart läuft..."}
         except Exception as e: return {"status": "error", "message": str(e)}
     else:
-        remote_data = {}
-        target_version = ""
+        is_linux = platform.system() == "Linux"
+        ext = "tar.gz" if is_linux else "zip"
+        os_prefix = "EmberCore_Linux" if is_linux else "EmberCore_Windows"
+        exe_url = None
+
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json")
-                if res.status_code == 200:
-                    remote_data = res.json()
-                    target_version = remote_data[0].get("version", "") if isinstance(remote_data, list) else remote_data.get("version", "")
-        except: pass
+                api_res = await client.get("https://api.github.com/repos/MasterBurns/EmberCore/releases/latest", timeout=10.0)
+                if api_res.status_code == 200:
+                    for asset in api_res.json().get("assets", []):
+                        name = asset.get("name", "")
+                        if name.startswith(os_prefix) and name.endswith(ext) and "Setup" not in name:
+                            exe_url = asset.get("browser_download_url")
+                            break
+        except Exception as e:
+            return {"status": "error", "message": f"Fehler bei GitHub API Abfrage: {str(e)}"}
 
-        # --- OS ERKENNUNG FÜR DEN DOWNLOAD ---
-        is_linux = platform.system() == "Linux"
-        os_name = "Linux" if is_linux else "Windows"
-        ext = "tar.gz" if is_linux else "zip"
+        if not exe_url:
+            return {"status": "error", "message": f"Kein passendes Update-Paket ({os_prefix}...{ext}) im neuesten Release gefunden!"}
 
-        file_name = f"EmberCore_{os_name}_{target_version}.{ext}" if target_version else f"EmberCore_{os_name}.{ext}"
-        exe_url = f"https://github.com/MasterBurns/EmberCore/releases/download/{target_version}/{file_name}" if target_version else f"https://github.com/MasterBurns/EmberCore/releases/latest/download/{file_name}"
         archive_path = os.path.join(EXE_DIR, f"EmberCore_update.{ext}")
         current_exe_path = sys.executable
 
@@ -634,16 +646,16 @@ async def update_embercore():
                 response = await client.get(exe_url, timeout=60.0, follow_redirects=True)
                 if response.status_code == 200:
                     with open(archive_path, "wb") as f: f.write(response.content)
-                else: return {"status": "error", "message": f"GitHub meldet Status {response.status_code} für das Archiv."}
+                else:
+                    return {"status": "error", "message": f"Download gescheitert (HTTP {response.status_code})!\nURL: {exe_url}"}
 
             with open(flag_path, "w") as f: f.write("1")
 
-            # --- OS SPEZIFISCHES ENTPACKEN ---
             if is_linux:
                 script_path = os.path.join(EXE_DIR, "update_worker.sh")
                 with open(script_path, "w", encoding="utf-8") as f:
                     f.write("#!/bin/bash\n")
-                    f.write("sleep 2\n") # Warte kurz, bis der Hauptprozess stirbt
+                    f.write("sleep 2\n")
                     f.write(f"tar -xzf '{archive_path}' -C '{EXE_DIR}'\n")
                     f.write(f"rm -f '{archive_path}'\n")
                     if "--service" in sys.argv:
@@ -674,7 +686,8 @@ async def update_embercore():
                 os._exit(0)
             asyncio.create_task(kill_switch())
             return {"status": "success", "message": "Update erfolgreich heruntergeladen. Führe Neustart aus..."}
-        except Exception as e: return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
+        except Exception as e:
+            return {"status": "error", "message": f"Update Prozess gecrasht: {str(e)}"}
 
 @app.get("/api/plugins/installed")
 def get_installed_plugins():
@@ -984,7 +997,6 @@ def save_server_config(plugin_id: str, data: dict = Body(...)):
     if os.path.exists(live_path): apply_desired_config_to_live(plugin_id)
     return {"status": "success", "message": "Soll-Konfiguration gespeichert."}
 
-# --- NEU: LISTEN (WHITELISTS / BANS) ROUTEN ---
 @app.get("/api/server/lists/{plugin_id}")
 def get_server_lists(plugin_id: str):
     manifest = load_manifest(plugin_id)
@@ -1010,7 +1022,6 @@ def save_server_lists(plugin_id: str, payload: dict = Body(...)):
             with open(file_path, "w", encoding="utf-8") as f: f.write(payload[list_id])
     return {"status": "success", "message": "Listen gespeichert."}
 
-# --- NEU: NETZWERK ROUTEN (FIREWALL & UPNP) ---
 @app.get("/api/server/network/{plugin_id}")
 def get_network(plugin_id: str):
     manifest = load_manifest(plugin_id)
@@ -1049,17 +1060,14 @@ def setup_network(plugin_id: str):
         rule_name = f"EmberCore_{plugin_id}_{p['port']}_{p['protocol'].upper()}"
         ps_commands.append(f"  try {{ $map.Remove({p['port']}, '{p['protocol'].upper()}') }} catch {{}}")
         ps_commands.append(f"  try {{ $map.Add({p['port']}, '{p['protocol'].upper()}', {p['port']}, '{local_ip}', $true, '{rule_name}') }} catch {{}}")
-
-    # HIER IST DER FIX: Das "s: ..." am Ende ist weg!
     ps_commands.append("} }")
-
     ps_commands.append("Write-Host 'Erfolgreich hinzugefuegt! Fenster schliesst sich in 3 Sekunden.'")
     ps_commands.append("Start-Sleep -Seconds 3")
 
     ps_script = os.path.join(EXE_DIR, "network_setup.ps1")
     with open(ps_script, "w", encoding="utf-8") as f: f.write("\n".join(ps_commands))
 
-    subprocess.Popen(["powershell", "-Command", f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -File \"{ps_script}\"' -Verb RunAs"])
+    subprocess.Popen(["powershell", "-Command", f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"])
     return {"status": "success", "message": "Bitte bestätige gleich die Windows-Sicherheitsabfrage (Schild-Symbol), um die Freigabe abzuschließen!"}
 
 @app.get("/api/server/backup/schedule/{plugin_id}")

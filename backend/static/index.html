@@ -13,11 +13,39 @@
         ::-webkit-scrollbar-track { background: #0b0f19; }
         ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
         .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+        /* Modal Animationen */
+        .modal-enter-active, .modal-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+        .modal-enter-from, .modal-leave-to { opacity: 0; transform: scale(0.95); }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
-    <div id="app" class="flex-1 flex flex-col min-h-screen">
+    <div id="app" class="flex-1 flex flex-col min-h-screen relative">
 
+        <Transition name="modal">
+            <div v-if="uiModal.show" class="fixed inset-0 bg-black/80 z-[99999] flex items-center justify-center p-4 backdrop-blur-sm">
+                <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col transform transition-all scale-100">
+                    <div class="p-4 border-b border-gray-800 bg-gray-950 flex justify-between items-center">
+                        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                            <span v-if="uiModal.type === 'alert'" class="text-orange-500 text-xl">ℹ️</span>
+                            <span v-if="uiModal.type === 'confirm'" class="text-red-500 text-xl">⚠️</span>
+                            <span v-if="uiModal.type === 'prompt'" class="text-blue-500 text-xl">✏️</span>
+                            {{ uiModal.title }}
+                        </h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <p class="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{{ uiModal.message }}</p>
+                        <input v-if="uiModal.type === 'prompt'" id="modal-input" type="text" v-model="uiModal.inputVal" :placeholder="uiModal.placeholder" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none font-mono" @keyup.enter="resolveModal(uiModal.inputVal)">
+                    </div>
+                    <div class="p-4 border-t border-gray-800 bg-gray-950 flex justify-end gap-3">
+                        <button v-if="uiModal.type !== 'alert'" @click="resolveModal(uiModal.type === 'prompt' ? null : false)" class="px-5 py-2.5 rounded-lg text-xs font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">Abbrechen</button>
+                        <button v-if="uiModal.type === 'alert'" @click="resolveModal(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Verstanden</button>
+                        <button v-if="uiModal.type === 'confirm'" @click="resolveModal(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Bestätigen</button>
+                        <button v-if="uiModal.type === 'prompt'" @click="resolveModal(uiModal.inputVal)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Speichern</button>
+                    </div>
+                </div>
+            </div>
+        </Transition>
         <div v-if="isReconnecting" class="reconnect-overlay">
             <div class="animate-spin rounded-full h-16 w-16 border-4 border-orange-500 border-t-transparent mb-6"></div>
             <h2 class="text-2xl font-bold text-white tracking-widest uppercase mb-2">System Update läuft</h2>
@@ -497,6 +525,35 @@
 
         createApp({
             setup() {
+                // --- EIGENES MODAL SYSTEM ---
+                const uiModal = ref({ show: false, type: 'alert', title: '', message: '', inputVal: '', placeholder: '', resolve: null });
+
+                const appAlert = (message, title="Information") => {
+                    return new Promise((resolve) => {
+                        uiModal.value = { show: true, type: 'alert', title, message, inputVal: '', placeholder: '', resolve };
+                    });
+                };
+
+                const appConfirm = (message, title="Bitte bestätigen") => {
+                    return new Promise((resolve) => {
+                        uiModal.value = { show: true, type: 'confirm', title, message, inputVal: '', placeholder: '', resolve };
+                    });
+                };
+
+                const appPrompt = (message, defaultVal="", placeholder="", title="Eingabe") => {
+                    return new Promise((resolve) => {
+                        uiModal.value = { show: true, type: 'prompt', title, message, inputVal: defaultVal, placeholder, resolve };
+                        setTimeout(() => { const el = document.getElementById('modal-input'); if(el) {el.focus(); el.select();} }, 50);
+                    });
+                };
+
+                const resolveModal = (result) => {
+                    if (uiModal.value.resolve) {
+                        uiModal.value.resolve(result);
+                    }
+                    uiModal.value.show = false;
+                };
+
                 const currentView = ref("system_status");
                 const serverTab = ref("status");
                 const selectedPlugin = ref(null);
@@ -580,19 +637,19 @@
                     try {
                         const res = await fetch('/api/system/service/install', { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message);
+                        await appAlert(data.message, "System Dienst");
                         setTimeout(fetchServiceStatus, 3000);
                     } catch (e) {}
                     isActionLoading.value = false;
                 };
 
                 const uninstallService = async () => {
-                    if (!confirm("Bist du sicher? EmberCore startet nach einem Server-Neustart dann nicht mehr automatisch!")) return;
+                    if (!(await appConfirm("Bist du sicher? EmberCore startet nach einem Server-Neustart dann nicht mehr automatisch!", "Dienst entfernen"))) return;
                     isActionLoading.value = true;
                     try {
                         const res = await fetch('/api/system/service/uninstall', { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message);
+                        await appAlert(data.message, "System Dienst");
                         setTimeout(fetchServiceStatus, 3000);
                     } catch (e) {}
                     isActionLoading.value = false;
@@ -603,7 +660,7 @@
                     try {
                         const res = await fetch('/api/system/service/start', { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message);
+                        await appAlert(data.message, "System Dienst");
                         setTimeout(fetchServiceStatus, 3000);
                     } catch (e) {}
                     isActionLoading.value = false;
@@ -614,7 +671,7 @@
                     try {
                         const res = await fetch('/api/system/service/stop', { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message);
+                        await appAlert(data.message, "System Dienst");
                         setTimeout(fetchServiceStatus, 3000);
                     } catch (e) {}
                     isActionLoading.value = false;
@@ -644,7 +701,7 @@
                         const data = await res.json();
 
                         if (data.status === 'info') {
-                            alert(data.message);
+                            await appAlert(data.message, "Kein Update");
                             isSystemUpdating.value = false;
                             showUpdateModal.value = false;
                         } else if (data.status === 'success') {
@@ -660,11 +717,11 @@
                                 } catch (e) { }
                             }, 2000);
                         } else {
-                            alert(data.message);
+                            await appAlert(data.message, "Update Fehler");
                             isSystemUpdating.value = false;
                         }
                     } catch (e) {
-                        alert("Update-Server nicht erreichbar.");
+                        await appAlert("Update-Server nicht erreichbar.", "Netzwerk Fehler");
                         isSystemUpdating.value = false;
                     }
                 };
@@ -717,10 +774,10 @@
                     try {
                         const res = await fetch(`/api/server/check-updates/${selectedPlugin.value}`, { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message);
+                        await appAlert(data.message, "Update Check");
                         fetchStats();
                     } catch (e) {
-                        alert("Konnte Steam-Server nicht erreichen.");
+                        await appAlert("Konnte Steam-Server nicht erreichen.", "Netzwerk Fehler");
                     }
                     isActionLoading.value = false;
                 };
@@ -770,7 +827,7 @@
                 const saveList = async (lst) => {
                     const payload = {}; payload[lst.id] = lst.content;
                     await fetch(`/api/server/lists/${selectedPlugin.value}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    alert("Liste erfolgreich auf dem Server gespeichert.");
+                    await appAlert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert");
                 };
 
                 const openNetworkTab = async () => {
@@ -784,7 +841,7 @@
                     loadingMessage.value = "Erstelle und sende Firewall/Router Anweisung...";
                     const res = await fetch(`/api/server/network/setup/${selectedPlugin.value}`, { method: 'POST' });
                     const data = await res.json();
-                    alert(data.message);
+                    await appAlert(data.message, "Netzwerk Setup");
                     isActionLoading.value = false;
                 };
 
@@ -796,13 +853,13 @@
                     loadingMessage.value = "Koppele mit Steam Workshop API...";
                     const res = await fetch(`/api/server/mods/add/${selectedPlugin.value}/${newModId.value.trim()}`, { method: 'POST' });
                     const data = await res.json();
-                    if(data.status === "error") alert(data.message);
+                    if(data.status === "error") await appAlert(data.message, "Workshop Fehler");
                     newModId.value = "";
                     isActionLoading.value = false;
                     fetchMods();
                 };
                 const deleteMod = async (modId) => {
-                    if (!confirm("Modifikation entfernen?")) return;
+                    if (!(await appConfirm("Möchtest du diese Modifikation wirklich vom Server entfernen?", "Mod löschen"))) return;
                     await fetch(`/api/server/mods/delete/${selectedPlugin.value}/${modId}`, { method: 'DELETE' });
                     fetchMods();
                 };
@@ -820,26 +877,29 @@
                 };
 
                 const subscribePlugin = async (plugin) => {
-                    const customName = prompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' ein:`, "Mein Server");
-                    if (!customName || customName.trim() === "") return;
+                    const customName = await appPrompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' Server ein:`, "Mein Server", "Neuen Server installieren");
+                    if (customName === null || customName.trim() === "") return;
                     const exists = installedPlugins.value.find(p => p.server_name.toLowerCase() === customName.trim().toLowerCase());
-                    if (exists) { alert("Servername existiert bereits!"); return; }
+                    if (exists) { await appAlert("Ein Server mit diesem Namen existiert bereits!", "Fehler"); return; }
 
                     isSubscribing.value = plugin.id;
                     const endpoint = `/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}&server_name=${encodeURIComponent(customName.trim())}`;
                     try {
                         const res = await fetch(endpoint, { method: 'POST' });
                         const data = await res.json();
-                        alert(data.message || data.detail);
+                        if (data.status === "error") {
+                            await appAlert(data.message || data.detail, "Installationsfehler");
+                        }
                         isSubscribing.value = null;
                         await loadInstalledPlugins();
                         if(data.status === "success" && data.instance_id) selectServer(data.instance_id);
-                    } catch (e) { alert("Verbindungsfehler."); isSubscribing.value = null; }
+                    } catch (e) { await appAlert("Server-Paket konnte nicht heruntergeladen werden.", "Netzwerkfehler"); isSubscribing.value = null; }
                 };
 
                 const saveConfig = async () => {
                     await fetch(`/api/server/config/${selectedPlugin.value}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(configData.value.values) });
                     loadInstalledPlugins();
+                    await appAlert("Die Konfiguration wurde erfolgreich gespeichert.", "Erfolg");
                 };
 
                 const installServer = async () => {
@@ -867,7 +927,7 @@
                 };
 
                 const deleteServer = async () => {
-                    if (!confirm(`Möchtest du den Server komplett entfernen?`)) return;
+                    if (!(await appConfirm(`Möchtest du den Server '${currentServerData.value.server_name}' mitsamt aller Spieldateien und Backups komplett löschen? Das kann nicht rückgängig gemacht werden!`, "Server vernichten"))) return;
                     await fetch(`/api/server/delete/${selectedPlugin.value}`, { method: 'DELETE' });
                     openMarketplace();
                     loadInstalledPlugins();
@@ -878,10 +938,20 @@
                 const addSchedule = () => { if(!newSchedVal.value) return; backupSchedule.value.schedules.push({ type: newSchedType.value, value: newSchedVal.value }); saveBackupSettings(); newSchedVal.value = ""; };
                 const removeSchedule = (idx) => { backupSchedule.value.schedules.splice(idx, 1); saveBackupSettings(); };
                 const saveBackupSettings = async () => { await fetch(`/api/server/backup/schedule/${selectedPlugin.value}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backupSchedule.value) }); };
-                const applyFix = async (fixType) => { isActionLoading.value = true; const res = await fetch(`/api/server/diagnostics/fix/${selectedPlugin.value}/${fixType}`, { method: 'POST' }); const data = await res.json(); alert(data.message); isActionLoading.value = false; fetchStats(); };
+                const applyFix = async (fixType) => { isActionLoading.value = true; const res = await fetch(`/api/server/diagnostics/fix/${selectedPlugin.value}/${fixType}`, { method: 'POST' }); const data = await res.json(); await appAlert(data.message, "Absturz-Schutz"); isActionLoading.value = false; fetchStats(); };
                 const createBackup = async () => { await fetch(`/api/server/backup/create/${selectedPlugin.value}`, { method: 'POST' }); fetchBackups(); };
-                const restoreBackup = async (filename) => { if (!confirm(`Backup '${filename}' einspielen?`)) return; await fetch(`/api/server/backup/restore/${selectedPlugin.value}/${filename}`, { method: 'POST' }); };
-                const deleteBackup = async (filename) => { if (!confirm(`ZIP-Archiv löschen?`)) return; await fetch(`/api/server/backup/delete/${selectedPlugin.value}/${filename}`, { method: 'DELETE' }); fetchBackups(); };
+
+                const restoreBackup = async (filename) => {
+                    if (!(await appConfirm(`Möchtest du das Backup '${filename}' wirklich einspielen?\n\nAlle aktuellen Fortschritte werden überschrieben!`, "Backup einspielen"))) return;
+                    await fetch(`/api/server/backup/restore/${selectedPlugin.value}/${filename}`, { method: 'POST' });
+                    await appAlert("Das Rollback war erfolgreich.", "Erfolg");
+                };
+
+                const deleteBackup = async (filename) => {
+                    if (!(await appConfirm(`Soll das Backup unwiderruflich gelöscht werden?`, "Archiv löschen"))) return;
+                    await fetch(`/api/server/backup/delete/${selectedPlugin.value}/${filename}`, { method: 'DELETE' });
+                    fetchBackups();
+                };
 
                 onMounted(() => {
                     loadSystemInfo();
@@ -896,6 +966,7 @@
                 onUnmounted(() => { clearInterval(statsInterval); });
 
                 return {
+                    uiModal, resolveModal,
                     currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
                     serverStats, systemServiceStats, installedPlugins, availablePlugins, backupList, configData, listData, networkData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
                     systemInfo, showUpdateModal, isSystemUpdating, isReconnecting, systemUpdateAvailable, triggerSystemUpdate, checkGameUpdate,

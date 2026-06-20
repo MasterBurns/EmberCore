@@ -1,4 +1,12 @@
 [
+    {
+  "version": "v0.1.4.2",
+  "build_date": "2024-03-24",
+  "changelog": [
+    "FIX: UAC Meldung und Service Registration unter Windows",
+    "FIX: Browser Meldung PopUps blockieren"
+  ]
+  },
   {
   "version": "v0.1.4.1",
   "build_date": "2024-03-24",
