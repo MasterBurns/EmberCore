@@ -427,7 +427,7 @@ def system_service_status():
             except: pass
     else:
         try:
-            # FIX: Echter Dienst-Check über das native Windows "sc" Kommando! (Klappt ohne Admin-Rechte)
+            # FIX: Echter Windows-Dienst Check! Das sc (Service Control) Kommando braucht keine Admin-Rechte zum Lesen.
             flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
             res = subprocess.run(["sc", "query", "EmberCore"], capture_output=True, text=True, creationflags=flags)
             if res.returncode == 0:
@@ -441,10 +441,10 @@ def system_service_status():
     except: pass
 
     try:
-        # FIX: Nur den Verbrauch von EmberCore selbst messen und durch die Kerne teilen!
+        # FIX: CPU-Anzeige misst jetzt NUR noch EmberCore selbst und teilt durch die Prozessorkerne!
         proc = psutil.Process(os.getpid())
         ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
-        proc.cpu_percent(interval=None) # Startpunkt der Messung
+        proc.cpu_percent(interval=None)
         time.sleep(0.05)
         ember_cpu = round(proc.cpu_percent(interval=None) / psutil.cpu_count(), 1)
     except:
@@ -493,22 +493,29 @@ def install_system_service():
             subprocess.run(["systemctl", "enable", "embercore.service"])
             return {"status": "success", "message": "EmberCore wurde als systemd-Service installiert!"}
         else:
-            # FIX: ECHTE Windows Services via WinSW-Wrapper!
+            # FIX: ECHTER Windows Service via offiziellem WinSW-Wrapper!
             winsw_url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
             svc_exe = os.path.join(EXE_DIR, "EmberCoreService.exe")
             svc_xml = os.path.join(EXE_DIR, "EmberCoreService.xml")
 
-            # Lade den Wrapper herunter, falls er fehlt
             if not os.path.exists(svc_exe):
                 try:
+                    # Wirft den Python-Downloader statt PowerShell an, weil das immer durch Firewalls kommt!
                     req = urllib.request.Request(winsw_url, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=30) as response, open(svc_exe, 'wb') as out_file:
                         shutil.copyfileobj(response, out_file)
                 except Exception as e:
                     return {"status": "error", "message": f"Konnte WinSW Service-Wrapper nicht herunterladen: {e}"}
 
-            executable_path = os.path.abspath(exe_path if IS_COMPILED else sys.executable)
-            arguments = "--service" if IS_COMPILED else f'"{os.path.abspath(exe_path)}" --service'
+            def escape_xml(s): return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            executable_path = escape_xml(os.path.abspath(sys.executable))
+            working_dir = escape_xml(EXE_DIR)
+
+            if IS_COMPILED:
+                arguments = "--service"
+            else:
+                script_path = escape_xml(os.path.abspath(sys.argv[0]))
+                arguments = f'"{script_path}" --service'
 
             xml_content = f"""<service>
   <id>EmberCore</id>
@@ -517,7 +524,7 @@ def install_system_service():
   <executable>{executable_path}</executable>
   <arguments>{arguments}</arguments>
   <log mode="roll"></log>
-  <workingdirectory>{EXE_DIR}</workingdirectory>
+  <workingdirectory>{working_dir}</workingdirectory>
   <onfailure action="restart" delay="10 sec"/>
   <startmode>Automatic</startmode>
 </service>"""
@@ -526,7 +533,8 @@ def install_system_service():
 
             ps_script = os.path.join(EXE_DIR, "install_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
-                f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n") # Cleanup von alten Tasks
+                # Alte kaputte Aufgabe vorsichtshalber löschen, falls vorhanden
+                f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
                 f.write(f"& '{svc_exe}' install\n")
                 f.write(f"& '{svc_exe}' start\n")
 
@@ -534,7 +542,7 @@ def install_system_service():
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
                 ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
-                return {"status": "info", "message": "Bestätige das Windows Admin-Schild. EmberCore wird als ECHTER Windows Dienst registriert!"}
+                return {"status": "info", "message": "Bitte das Windows Admin-Schild bestätigen. EmberCore lädt den Wrapper und registriert sich als ECHTER Windows Dienst!"}
             else:
                 subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True, stdout=subprocess.DEVNULL)
                 return {"status": "success", "message": "Echter Windows-Dienst erfolgreich installiert!"}
@@ -562,6 +570,7 @@ def uninstall_system_service():
         svc_exe = os.path.join(EXE_DIR, "EmberCoreService.exe")
         ps_script = os.path.join(EXE_DIR, "uninstall_service.ps1")
         with open(ps_script, "w", encoding="utf-8") as f:
+            f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
             f.write(f"if (Test-Path '{svc_exe}') {{ & '{svc_exe}' stop; & '{svc_exe}' uninstall }}\n")
             f.write(f"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
 
@@ -587,7 +596,7 @@ def start_system_service():
             svc_exe = os.path.join(EXE_DIR, "EmberCoreService.exe")
             ps_script = os.path.join(EXE_DIR, "start_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
-                f.write(f"& '{svc_exe}' start\n")
+                f.write(f"if (Test-Path '{svc_exe}') {{ & '{svc_exe}' start }}\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
                 ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
@@ -609,7 +618,7 @@ def stop_system_service():
             svc_exe = os.path.join(EXE_DIR, "EmberCoreService.exe")
             ps_script = os.path.join(EXE_DIR, "stop_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
-                f.write(f"& '{svc_exe}' stop\n")
+                f.write(f"if (Test-Path '{svc_exe}') {{ & '{svc_exe}' stop }}\n")
                 f.write(f"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
@@ -618,7 +627,7 @@ def stop_system_service():
             else:
                 subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
         return {"status": "success", "message": "Service-Stopp wurde angefordert."}
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e: return {"status": "error", "message": str(e)}S
 
 ##########################################
 
@@ -848,13 +857,14 @@ def stop(plugin_id: str): return manager.stop_server(plugin_id)
 def stats(plugin_id: str):
     data = manager.get_stats(plugin_id)
 
-    # --- KUGELSICHERE RAM & CPU BERECHNUNG (Fängt Conan Exiles 8GB Child-Prozesse) ---
+    # --- KUGELSICHERE RAM & CPU BERECHNUNG (Fängt alle abgekoppelten Game-Engines!) ---
     if data.get("status") == "online":
         try:
             target_procs = {}
-            server_dir_lower = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))).lower()
+            # Formatiert den Pfad so, dass Windows mit Slashes und Groß-/Kleinschreibung nicht durcheinanderkommt
+            server_dir_clean = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))) + os.sep
 
-            # Methode 1: Prozessbaum (Der direkte Weg vom Launcher zu den Kindern)
+            # 1. Direkte Kinder der Popen-Instanz abfragen (Normaler Weg)
             if plugin_id in manager.processes:
                 try:
                     parent_proc = psutil.Process(manager.processes[plugin_id].pid)
@@ -864,37 +874,53 @@ def stats(plugin_id: str):
                 except psutil.NoSuchProcess:
                     pass
 
-            # Methode 2: Arbeitsverzeichnis / Executable scannen (Fängt abgetrennte Prozesse der 8GB Engine!)
-            for p in psutil.process_iter(['exe', 'cwd']):
+            # 2. Systemweiter Scan (Fängt fiese Server ein, die sich wie Conan vom Launcher getrennt haben)
+            for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name']):
                 try:
-                    exe = p.info.get('exe')
-                    cwd = p.info.get('cwd')
+                    if p.info['pid'] in target_procs: continue
 
-                    if exe and os.path.normcase(os.path.abspath(exe)).lower().startswith(server_dir_lower):
-                        target_procs[p.pid] = p
-                    elif cwd and os.path.normcase(os.path.abspath(cwd)).lower().startswith(server_dir_lower):
-                        target_procs[p.pid] = p
+                    p_name = str(p.info.get('name') or '').lower()
+                    # Verhindert, dass wir aus Versehen cmd.exe oder EmberCore selbst zusammenzählen
+                    if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe"]:
+                        continue
+
+                    exe = p.info.get('exe')
+                    if exe:
+                        exe_clean = os.path.normcase(os.path.abspath(exe))
+                        if exe_clean.startswith(server_dir_clean):
+                            target_procs[p.info['pid']] = p
+                            continue
+
+                    cwd = p.info.get('cwd')
+                    if cwd:
+                        cwd_clean = os.path.normcase(os.path.abspath(cwd)) + os.sep
+                        if cwd_clean.startswith(server_dir_clean):
+                            target_procs[p.info['pid']] = p
+                            continue
                 except: pass
 
             if target_procs:
                 total_ram = 0
+                valid_procs = []
                 for p in target_procs.values():
                     try:
                         total_ram += p.memory_info().rss
-                        p.cpu_percent(interval=None) # Startpunkt für CPU-Messung initialisieren
+                        p.cpu_percent(interval=None) # Start für die CPU Messung
+                        valid_procs.append(p)
                     except: pass
 
-                time.sleep(0.1) # WICHTIG: Windows braucht einen winzigen Moment für die CPU-Differenz
+                if valid_procs:
+                    time.sleep(0.1) # Kurze Pause, damit Windows die CPU Differenz messen kann
 
-                total_cpu = 0.0
-                for p in target_procs.values():
-                    try:
-                        # Durch Kerne teilen für exakte Task-Manager Prozentangabe
-                        total_cpu += (p.cpu_percent(interval=None) / psutil.cpu_count())
-                    except: pass
+                    total_cpu = 0.0
+                    for p in valid_procs:
+                        try:
+                            # Durch die Anzahl der Kerne teilen = exakte Anzeige wie im Windows Taskmanager!
+                            total_cpu += (p.cpu_percent(interval=None) / psutil.cpu_count())
+                        except: pass
 
-                data["ram_mb"] = round(total_ram / (1024 * 1024), 2)
-                data["cpu_percent"] = round(total_cpu, 1)
+                    data["ram_mb"] = round(total_ram / (1024 * 1024), 2)
+                    data["cpu_percent"] = round(total_cpu, 1)
         except Exception:
             pass
 
