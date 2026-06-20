@@ -1,0 +1,11 @@
+[
+  {
+    "id": "conan_exiles",
+    "name": "Conan Exiles Dedicated Server",
+    "category": "Survival",
+    "version": "1.0.0",
+    "developer": "MasterBurns",
+    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/conan_exiles.zip",
+    "description": "Conan Exiles Server"
+  }
+]

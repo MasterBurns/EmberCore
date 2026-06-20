@@ -1,0 +1,98 @@
+name: "Conan Exiles Dedicated Server"
+id: "conan_exiles"
+category: "Survival"
+engine: "steamcmd"
+steam_app_id: 443030
+executable_windows: "ConanSandboxServer.exe"
+default_args:
+  - "-log"
+ports:
+  - 7777
+  - 27015
+backup:
+  source_path: "ConanSandbox/Saved"
+
+mods_meta:
+  file_path: "ConanSandbox/Mods/modlist.txt"
+  workshop_url_template: "https://steamcommunity.com/sharedfiles/filedetails/?id="
+  steam_workshop_appid: 443030 # Conan Exiles nutzt die Hauptspiel-ID für den Workshop
+
+# --- Fehler-Erkennungsmuster für die Log-Analyse ---
+diagnostics:
+  - id: "port_in_use"
+    pattern: "bind\\(\\) failed|proeess failed to bind"
+    message: "Netzwerk-Konflikt: Ein benötigter Port ist blockiert. Überprüfe, ob im Hintergrund noch eine alte Instanz aktiv ist."
+    fix_type: "manual"
+    fix_label: "Ports manuell prüfen"
+
+  - id: "db_corrupt"
+    pattern: "Database is corrupt|malformed database|Could not load game.db"
+    message: "Datenbank-Beschädigung: Die 'game.db' ist korrupt. Der Server wird nicht ordnungsgemäß starten."
+    fix_type: "restore_backup"
+    fix_label: "💾 Letztes intaktes Backup einspielen"
+
+  - id: "mod_error"
+    pattern: "PakFile is corrupt|Failed to load mod|Mod mismatch"
+    message: "Mod-Konflikt: Eine geladene Modifikation (.pak) verursacht Fehler oder ist veraltet."
+    fix_type: "update_server"
+    fix_label: "🔄 Server-Reparatur via SteamCMD ausführen"
+
+# --- Vollständige Konfigurations-Struktur für das Web-UI ---
+config_meta:
+  file_path: "ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini"
+  format: "key_value"
+  fields:
+    # -- Basis-Einstellungen --
+    - key: "ServerName"
+      label: "Server-Name (Hostname)"
+      type: "text"
+      default: "EmberCore Dedicated Server"
+    - key: "AutoUpdateOnStart"
+      label: "SteamCMD Auto-Update beim Serverstart"
+      type: "boolean"
+      boolean_mode: "text" # Speichert intern True/False
+      default: "True"
+    - key: "ServerPassword"
+      label: "Server-Passwort (leer für öffentlich)"
+      type: "text"
+      default: ""
+    - key: "MaxPlayers"
+      label: "Maximale Spieleranzahl"
+      type: "number"
+      default: 40
+    - key: "IsVACBanned"
+      label: "Valve Anti-Cheat (VAC) Schutz"
+      type: "boolean"
+      boolean_mode: "numeric" # Schreibt 1 oder 0 in die INI
+      default: 1
+    # -- Clan & PvP --
+    - key: "MaxClanSize"
+      label: "Maximale Clan-Größe"
+      type: "number"
+      default: 10
+    - key: "PVPEnabled"
+      label: "PvP-Modus (Spieler gegen Spieler)"
+      type: "boolean"
+      boolean_mode: "text" # Schreibt True oder False in die INI
+      default: "False"
+    # -- Multiplikatoren --
+    - key: "PlayerXPRateMultiplier"
+      label: "Erfahrungs-Multiplikator (XP-Rate)"
+      type: "number"
+      default: 1.0
+    - key: "HarvestAmountMultiplier"
+      label: "Ressourcen-Ernte-Multiplikator"
+      type: "number"
+      default: 1.0
+    - key: "ItemConvertionMultiplier"
+      label: "Crafting-Geschwindigkeit (Kleiner = Schneller)"
+      type: "number"
+      default: 1.0
+    - key: "PlayerActiveThirstMultiplier"
+      label: "Durst-Multiplikator (Spieler)"
+      type: "number"
+      default: 1.0
+    - key: "PlayerActiveHungerMultiplier"
+      label: "Hunger-Multiplikator (Spieler)"
+      type: "number"
+      default: 1.0
