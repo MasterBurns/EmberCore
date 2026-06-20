@@ -1,0 +1,41 @@
+name: Build Windows EXE
+
+# Dieser Workflow startet, wenn du einen neuen Release-Tag (z.B. v0.2.0) auf GitHub pushst
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install fastapi uvicorn psutil httpx pyyaml pydantic
+
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --name "EmberCore" --add-data "backend/static;static" --add-data "backend/dev_plugins;dev_plugins" --clean --noconfirm backend/main.py
+
+    - name: Zip the Output
+      run: |
+        Compress-Archive -Path dist\EmberCore\* -DestinationPath EmberCore_Windows.zip
+
+    - name: Upload Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: EmberCore_Windows.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
