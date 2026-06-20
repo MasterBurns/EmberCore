@@ -12,8 +12,6 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #0b0f19; }
         ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
-
-        /* Fullscreen Overlay für System-Neustart */
         .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     </style>
 </head>
@@ -44,6 +42,11 @@
                         </button>
                     </div>
 
+                    <div v-if="systemUpdateAvailable" class="bg-blue-900/40 border border-blue-500/50 rounded-lg p-4 animate-pulse">
+                        <p class="text-blue-400 text-sm font-bold">🚀 Eine neuere Version ist auf GitHub verfügbar!</p>
+                        <p class="text-xs text-blue-200 mt-1">Klicke auf den Update-Button, um das System neu zu starten.</p>
+                    </div>
+
                     <div class="space-y-2">
                         <p class="text-xs text-gray-500 uppercase font-bold tracking-wider border-b border-gray-900 pb-2">Changelog (Neu in dieser Version)</p>
                         <ul class="text-sm text-gray-300 space-y-2 pt-2">
@@ -59,9 +62,13 @@
         <div class="flex-1 flex overflow-hidden">
             <aside class="w-64 bg-gray-950 border-r border-gray-900 flex flex-col justify-between shadow-xl">
                 <div class="p-4 flex-1 overflow-y-auto space-y-6">
-                    <div class="flex items-center space-x-2 pb-4 border-b border-gray-900 cursor-pointer group" @click="showUpdateModal = true">
+                    <div class="flex items-center space-x-2 pb-4 border-b border-gray-900 cursor-pointer group relative" @click="showUpdateModal = true">
                         <span class="text-xl font-black tracking-wider text-orange-500 group-hover:text-orange-400 transition">🔥 EMBERCORE</span>
-                        <span class="text-[10px] bg-gray-900 border border-gray-800 text-gray-500 px-1.5 py-0.5 rounded font-mono group-hover:border-orange-900 group-hover:text-orange-300 transition">{{ systemInfo.version }}</span>
+                        <span :class="systemUpdateAvailable ? 'bg-blue-600 text-white border-blue-500 animate-pulse' : 'bg-gray-900 border-gray-800 text-gray-500'" class="text-[10px] border px-1.5 py-0.5 rounded font-mono transition">{{ systemInfo.version }}</span>
+                        <span v-if="systemUpdateAvailable" class="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
                     </div>
 
                     <div class="space-y-5">
@@ -94,6 +101,7 @@
             </aside>
 
             <main class="flex-1 bg-gray-900/40 overflow-y-auto p-6">
+
                 <div v-if="currentView === 'marketplace'" class="max-w-4xl mx-auto space-y-6">
                     <div>
                         <h1 class="text-2xl font-black text-white tracking-tight">Neuen Server hinzufügen</h1>
@@ -119,6 +127,7 @@
                 </div>
 
                 <div v-if="currentView === 'server'" class="max-w-4xl mx-auto space-y-6">
+
                     <div class="flex justify-between items-center bg-gray-950 p-4 rounded-xl border border-gray-900 shadow-md">
                         <div class="flex items-center space-x-6">
                             <div class="min-w-[200px]">
@@ -140,8 +149,26 @@
                     </div>
 
                     <div v-if="serverTab === 'status'" class="space-y-6">
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <button @click="installServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">📦 Installieren / Update</button>
+
+                        <div v-if="serverStats.update_info && serverStats.update_info.available" class="bg-blue-950/80 border border-blue-500 rounded-xl p-5 shadow-[0_0_15px_rgba(59,130,246,0.3)] flex justify-between items-center animate-pulse">
+                            <div>
+                                <h3 class="text-blue-400 font-bold uppercase tracking-wider text-xs flex items-center gap-2">🔄 Spiel-Update auf Steam verfügbar!</h3>
+                                <p class="text-xs text-blue-200 mt-1">Installierter Build: <span class="font-mono">{{ serverStats.update_info.local }}</span> | Aktuell auf Steam: <span class="font-mono">{{ serverStats.update_info.remote }}</span></p>
+                            </div>
+                            <button @click="installServer" :disabled="isActionLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded transition cursor-pointer shadow">
+                                Jetzt aktualisieren
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <button @click="installServer" :disabled="isActionLoading || serverStats.status === 'online'"
+                                :class="(serverStats.update_info && serverStats.update_info.available) ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.5)] border border-orange-400' : 'bg-blue-600 hover:bg-blue-500 border border-transparent'"
+                                class="disabled:bg-gray-950 disabled:border-gray-900 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition cursor-pointer text-sm flex flex-col items-center justify-center text-center">
+                                <span>{{ (serverStats.update_info && serverStats.update_info.available) ? '🔄 Update verfügbar' : '📦 Installieren / Update' }}</span>
+                            </button>
+                            <button @click="checkGameUpdate" :disabled="isActionLoading" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm border border-gray-700">
+                                🔎 Update prüfen
+                            </button>
                             <button @click="startServer" :disabled="isActionLoading || serverStats.status === 'online'" class="bg-green-600 hover:bg-green-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">▶️ Server Starten</button>
                             <button @click="stopServer" :disabled="isActionLoading || serverStats.status === 'offline'" class="bg-red-600 hover:bg-red-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">⏹️ Server Stoppen</button>
                         </div>
@@ -163,14 +190,8 @@
                             <div class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-inner flex flex-col justify-between">
                                 <p class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-4 border-b border-gray-900 pb-2">Ressourcen-Nutzung</p>
                                 <div class="flex justify-between items-end">
-                                    <div>
-                                        <p class="text-[10px] text-gray-600 font-bold uppercase">CPU-Auslastung</p>
-                                        <p class="text-3xl font-mono font-bold text-orange-400">{{ serverStats.status === 'online' ? serverStats.cpu_percent + ' %' : '---' }}</p>
-                                    </div>
-                                    <div class="text-right">
-                                        <p class="text-[10px] text-gray-600 font-bold uppercase">RAM-Verbrauch</p>
-                                        <p class="text-3xl font-mono font-bold text-blue-400">{{ serverStats.status === 'online' ? serverStats.ram_mb + ' MB' : '---' }}</p>
-                                    </div>
+                                    <div><p class="text-[10px] text-gray-600 font-bold uppercase">CPU-Auslastung</p><p class="text-3xl font-mono font-bold text-orange-400">{{ serverStats.status === 'online' ? serverStats.cpu_percent + ' %' : '---' }}</p></div>
+                                    <div class="text-right"><p class="text-[10px] text-gray-600 font-bold uppercase">RAM-Verbrauch</p><p class="text-3xl font-mono font-bold text-blue-400">{{ serverStats.status === 'online' ? serverStats.ram_mb + ' MB' : '---' }}</p></div>
                                 </div>
                             </div>
                             <div class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-inner flex flex-col justify-between">
@@ -196,7 +217,7 @@
                         <div class="p-4 border-b border-gray-900 flex justify-between items-center bg-gray-900/80">
                             <div>
                                 <h3 class="text-sm font-bold text-white uppercase tracking-wider">📟 Live Terminal</h3>
-                                <p class="text-xs text-gray-500">Direkter stdout des Prozesses (hilfreich bei Wine/Mod-Abfragen)</p>
+                                <p class="text-xs text-gray-500">Direkter stdout des Prozesses</p>
                             </div>
                         </div>
                         <div class="flex-1 p-4 overflow-y-auto font-mono text-xs text-gray-300 bg-[#0a0a0a]" id="console-output">
@@ -330,13 +351,13 @@
             setup() {
                 const currentView = ref("server");
                 const serverTab = ref("status");
-                const selectedPlugin = ref("hlds_test");
+                const selectedPlugin = ref(null);
 
                 const isActionLoading = ref(false);
                 const isSubscribing = ref(null);
                 const loadingMessage = ref("");
 
-                const serverStats = ref({ status: "offline", cpu_percent: 0, ram_mb: 0, disk: null });
+                const serverStats = ref({ status: "offline", cpu_percent: 0, ram_mb: 0, disk: null, update_info: { available: false } });
                 const installedPlugins = ref([]);
                 const availablePlugins = ref([]);
                 const backupList = ref([]);
@@ -350,11 +371,11 @@
                 const newSchedType = ref("daily");
                 const newSchedVal = ref("");
 
-                // NEU: System Update Variablen
                 const systemInfo = ref({ version: "Laden...", build_date: "", changelog: [] });
                 const showUpdateModal = ref(false);
                 const isSystemUpdating = ref(false);
                 const isReconnecting = ref(false);
+                const systemUpdateAvailable = ref(false);
 
                 let statsInterval = null;
 
@@ -378,6 +399,16 @@
                     } catch (e) {}
                 };
 
+                const checkSystemUpdate = async () => {
+                    try {
+                        const res = await fetch('/api/system/check-update');
+                        if (res.ok) {
+                            const data = await res.json();
+                            systemUpdateAvailable.value = data.update_available;
+                        }
+                    } catch (e) {}
+                };
+
                 const triggerSystemUpdate = async () => {
                     isSystemUpdating.value = true;
                     try {
@@ -390,17 +421,15 @@
                             showUpdateModal.value = false;
                         } else if (data.status === 'success') {
                             showUpdateModal.value = false;
-                            isReconnecting.value = true; // Zeige Ladebildschirm
-
-                            // Versuche alle 2 Sekunden, die Seite neu zu laden, sobald Python wieder da ist
+                            isReconnecting.value = true;
                             const pingInterval = setInterval(async () => {
                                 try {
                                     const ping = await fetch('/api/system/version');
                                     if (ping.ok) {
                                         clearInterval(pingInterval);
-                                        window.location.reload(true); // Hard Reload
+                                        window.location.reload(true);
                                     }
-                                } catch (e) { /* Noch offline, weiter warten */ }
+                                } catch (e) { }
                             }, 2000);
                         } else {
                             alert(data.message);
@@ -451,6 +480,20 @@
                             }
                         }
                     } catch (err) {}
+                };
+
+                const checkGameUpdate = async () => {
+                    isActionLoading.value = true;
+                    loadingMessage.value = "Frage Steam-Server nach neuer Version...";
+                    try {
+                        const res = await fetch(`/api/server/check-updates/${selectedPlugin.value}`, { method: 'POST' });
+                        const data = await res.json();
+                        alert(data.message);
+                        fetchStats();
+                    } catch (e) {
+                        alert("Konnte Steam-Server nicht erreichen.");
+                    }
+                    isActionLoading.value = false;
                 };
 
                 const selectServer = (id) => {
@@ -578,16 +621,21 @@
 
                 onMounted(() => {
                     loadSystemInfo();
-                    loadInstalledPlugins();
-                    openMarketplace();
+                    checkSystemUpdate();
+                    loadInstalledPlugins().then(() => {
+                        if (installedPlugins.value.length === 0) openMarketplace();
+                    });
+
                     statsInterval = setInterval(fetchStats, 2000);
+                    setInterval(checkSystemUpdate, 3600000); // 1x pro Stunde checken
                 });
                 onUnmounted(() => { clearInterval(statsInterval); });
 
+                // --- HIER IST DAS ENTSCHEIDENDE RETURN, das den Button im HTML freigibt! ---
                 return {
                     currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
                     serverStats, installedPlugins, availablePlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
-                    systemInfo, showUpdateModal, isSystemUpdating, isReconnecting, triggerSystemUpdate,
+                    systemInfo, showUpdateModal, isSystemUpdating, isReconnecting, systemUpdateAvailable, triggerSystemUpdate, checkGameUpdate,
                     selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, openModsTab, fetchMods, addMod, deleteMod, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin, applyFix
                 };
             }

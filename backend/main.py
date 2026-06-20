@@ -1,7 +1,7 @@
 import json
 import socket
 import os
-import sys  # NEU: Für den sauberen Python-Neustart
+import sys
 import uvicorn
 import yaml
 import platform
@@ -26,7 +26,6 @@ from core.config_manager import ConfigManager
 from core.scheduler import BackupScheduler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Das Hauptverzeichnis des Git-Repos (eine Ebene über backend)
 ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
 manager = ServerManager()
@@ -35,9 +34,58 @@ backup_manager = BackupManager(base_dir=BASE_DIR)
 config_manager = ConfigManager()
 scheduler = BackupScheduler(base_dir=BASE_DIR, backup_manager=backup_manager)
 
+# --- NEU: STEAMCMD UPDATE-CHECKER LOGIK ---
+game_update_cache = {}
+
+async def fetch_game_update_status(plugin_id: str):
+    manifest = load_manifest(plugin_id)
+    if not manifest or manifest.get("engine") != "steamcmd": return None
+
+    app_id = manifest.get("steam_app_id")
+    if not app_id: return None
+
+    local_id = "0"
+    acf_path = os.path.join(BASE_DIR, "servers", plugin_id, "steamapps", f"appmanifest_{app_id}.acf")
+    if os.path.exists(acf_path):
+        with open(acf_path, "r", encoding="utf-8") as f:
+            match = re.search(r'"buildid"\s+"(\d+)"', f.read(), re.IGNORECASE)
+            if match: local_id = match.group(1)
+
+    if local_id != "0":
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(f"https://api.steamcmd.net/v1/info/{app_id}", timeout=10.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    remote_id = data.get("data", {}).get(str(app_id), {}).get("depots", {}).get("branches", {}).get("public", {}).get("buildid")
+                    if remote_id:
+                        status = {
+                            "available": str(local_id) != str(remote_id),
+                            "local": str(local_id),
+                            "remote": str(remote_id)
+                        }
+                        game_update_cache[plugin_id] = status
+                        return status
+        except Exception as e:
+            pass
+    return None
+
+async def game_update_checker_loop():
+    await asyncio.sleep(10)
+    print("[*] SteamCMD Update-Radar gestartet (Prüfung stündlich).")
+    while True:
+        try:
+            installed = get_installed_plugins()
+            for plugin in installed:
+                await fetch_game_update_status(plugin["id"])
+        except Exception as e:
+            pass
+        await asyncio.sleep(3600)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler.start_loop())
+    asyncio.create_task(game_update_checker_loop())
     yield
 
 app = FastAPI(title="EmberCore", version="0.2.0", lifespan=lifespan)
@@ -101,7 +149,6 @@ def calculate_disk_trend(plugin_id: str):
         "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)
     }
 
-# --- NEU: EMBERCORE SELF-UPDATER ROUTEN ---
 @app.get("/api/system/version")
 def get_system_version():
     version_file = os.path.join(ROOT_DIR, "version.json")
@@ -109,17 +156,25 @@ def get_system_version():
         with open(version_file, "r", encoding="utf-8") as f: return json.load(f)
     return {"version": "v0.1.0", "build_date": "Unknown", "changelog": ["Keine Version-Datei gefunden."]}
 
+@app.get("/api/system/check-update")
+def check_system_update():
+    try:
+        subprocess.run(["git", "fetch"], cwd=ROOT_DIR, check=True)
+        status = subprocess.run(["git", "status", "-uno"], cwd=ROOT_DIR, capture_output=True, text=True)
+        is_behind = "Your branch is behind" in status.stdout
+        return {"update_available": is_behind}
+    except Exception as e:
+        return {"update_available": False, "error": str(e)}
+
 @app.post("/api/system/update")
 async def update_embercore():
     try:
-        # Prüfen ob Git verfügbar ist und pull ausführen
         subprocess.run(["git", "fetch"], cwd=ROOT_DIR, check=True)
         pull_result = subprocess.run(["git", "pull"], cwd=ROOT_DIR, capture_output=True, text=True)
 
         if "Already up to date." in pull_result.stdout:
             return {"status": "info", "message": "EmberCore ist bereits auf dem neuesten Stand!"}
 
-        # Asynchroner Neustart (damit das Frontend das "success" noch empfängt)
         async def restart_server():
             await asyncio.sleep(1.5)
             print("[*] EmberCore führt Auto-Update Neustart durch...")
@@ -195,19 +250,30 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
         return {"status": "error", "message": str(e)}
 
-
 @app.post("/api/server/install/{plugin_id}")
 def install_server(plugin_id: str, req: InstallRequest = None):
     manifest = load_manifest(plugin_id)
-    return steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+    res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+    if plugin_id in game_update_cache:
+        game_update_cache[plugin_id]["available"] = False
+        game_update_cache[plugin_id]["local"] = game_update_cache[plugin_id].get("remote", "0")
+    return res
 
-# --- NEU: GAMESERVER AUTO-UPDATE BEIM START ---
+@app.post("/api/server/check-updates/{plugin_id}")
+async def force_check_game_updates(plugin_id: str):
+    status = await fetch_game_update_status(plugin_id)
+    if status:
+        if status["available"]:
+            return {"status": "success", "message": f"Steam Update verfügbar! (Lokal: {status['local']} -> Remote: {status['remote']})"}
+        else:
+            return {"status": "info", "message": f"Der Server ist bereits auf dem neuesten Stand. (Build: {status['local']})"}
+    return {"status": "error", "message": "Konnte Versionsdaten nicht prüfen. Server evtl. noch nicht installiert?"}
+
 @app.post("/api/server/start/{plugin_id}")
 def start(plugin_id: str):
     manifest = load_manifest(plugin_id)
     meta = manifest.get("config_meta")
 
-    # Prüfe den AutoUpdate Schalter in der Config
     if meta:
         file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
         values = config_manager.read_key_value_config(file_path, meta.get("fields", []))
@@ -215,10 +281,11 @@ def start(plugin_id: str):
         if auto_update is True or str(auto_update).lower() == "true" or auto_update == 1:
             print(f"[*] Auto-Update aktiv! Prüfe SteamCMD für {plugin_id}...")
             steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+            if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
 
     exe_suffix = manifest.get("executable_windows")
     executable_path = os.path.join(BASE_DIR, "servers", plugin_id, exe_suffix)
-    return manager.start_server(plugin_id, executable_path, manifest)
+    return manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
 
 @app.post("/api/server/stop/{plugin_id}")
 def stop(plugin_id: str): return manager.stop_server(plugin_id)
@@ -227,6 +294,7 @@ def stop(plugin_id: str): return manager.stop_server(plugin_id)
 def stats(plugin_id: str):
     data = manager.get_stats(plugin_id)
     data["disk"] = calculate_disk_trend(plugin_id)
+    data["update_info"] = game_update_cache.get(plugin_id, {"available": False})
     return data
 
 @app.get("/api/server/logs/{plugin_id}")
