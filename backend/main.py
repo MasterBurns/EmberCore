@@ -10,8 +10,11 @@ import subprocess
 import asyncio
 import io
 import zipfile
+import tarfile  # NEU: Falls jemand es doch auf Linux nutzt
 import httpx
 import re
+import webbrowser  # NEU: Öffnet den Browser automatisch
+import threading   # NEU: Verzögert den Browser-Start leicht
 from datetime import datetime, date, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body
@@ -41,6 +44,19 @@ DATA_ROOT = os.path.join(EXE_DIR, "data")
 PLUGINS_ROOT = os.path.join(EXE_DIR, "plugins")
 DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else os.path.join(EXE_DIR, "dev_plugins")
 
+# Globale Variable für den Port, damit der Browser weiß, wohin er muss
+ACTIVE_PORT = 8000
+
+def get_current_system_version():
+    v_path = os.path.join(BASE_DIR, "version.json") if IS_COMPILED else os.path.join(EXE_DIR, "version.json")
+    if os.path.exists(v_path):
+        try:
+            with open(v_path, "r", encoding="utf-8") as f: return json.load(f)
+        except: pass
+    return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."]}
+
+system_info = get_current_system_version()
+
 manager = ServerManager()
 steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
@@ -63,7 +79,6 @@ class CompiledSafeScheduler(BackupScheduler):
             retention = config.get("retention", {})
             now = datetime.now()
             today_str = now.strftime("%Y-%m-%d")
-
             backup_needed = False
             schedules_updated = False
 
@@ -148,19 +163,51 @@ async def game_update_checker_loop():
         except: pass
         await asyncio.sleep(3600)
 
+# --- NEU: STEAMCMD AUTO-DOWNLOADER ---
+async def prepare_steamcmd():
+    steam_dir = os.path.join(SERVERS_ROOT, "steamcmd")
+    os.makedirs(steam_dir, exist_ok=True)
+    is_windows = platform.system() == "Windows"
+    exe_path = os.path.join(steam_dir, "steamcmd.exe" if is_windows else "steamcmd.sh")
+
+    if not os.path.exists(exe_path):
+        print("[*] Erster Start erkannt: Lade Core-Komponenten (SteamCMD) herunter...")
+        url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" if is_windows else "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(url, follow_redirects=True, timeout=60.0)
+                if res.status_code == 200:
+                    if is_windows:
+                        with zipfile.ZipFile(io.BytesIO(res.content)) as z: z.extractall(steam_dir)
+                    else:
+                        with tarfile.open(fileobj=io.BytesIO(res.content), mode="r:gz") as tar: tar.extractall(steam_dir)
+                    print("[+] SteamCMD erfolgreich initialisiert!")
+        except Exception as e:
+            print(f"[-] Fehler beim SteamCMD Setup: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Zuerst SteamCMD prüfen und ggf. herunterladen
+    await prepare_steamcmd()
+
+    # 2. Hintergrund-Tasks starten
     asyncio.create_task(scheduler.start_loop())
     asyncio.create_task(game_update_checker_loop())
+
+    # 3. Browser nach 1,5 Sekunden Verzögerung automatisch öffnen
+    def open_browser():
+        print(f"[+] Öffne EmberCore Dashboard im Browser...")
+        webbrowser.open(f"http://127.0.0.1:{ACTIVE_PORT}")
+    threading.Timer(1.5, open_browser).start()
+
     yield
 
-app = FastAPI(title="EmberCore", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="EmberCore", version=system_info["version"], lifespan=lifespan)
 
 class InstallRequest(BaseModel): install_dir_name: Optional[str] = None
 
 disk_cache = {}
 
-# --- FEHLENDE FUNKTIONEN HINZUGEFÜGT ---
 def get_dir_size_mb(path):
     total = 0
     if os.path.exists(path):
@@ -225,10 +272,7 @@ def load_manifest(plugin_id: str):
 
 @app.get("/api/system/version")
 def get_system_version():
-    version_file = os.path.join(EXE_DIR, "version.json")
-    if os.path.exists(version_file):
-        with open(version_file, "r", encoding="utf-8") as f: return json.load(f)
-    return {"version": "v0.2.0", "build_date": "2026-06-20", "changelog": ["Compiled Mode aktiv."]}
+    return get_current_system_version()
 
 @app.get("/api/system/check-update")
 async def check_system_update():
@@ -244,7 +288,7 @@ async def check_system_update():
                 res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json", timeout=5.0)
                 if res.status_code == 200:
                     remote_version = res.json().get("version", "")
-                    local_version = get_system_version()["version"]
+                    local_version = get_current_system_version()["version"]
                     return {"update_available": remote_version != local_version}
         except: pass
         return {"update_available": False}
@@ -263,24 +307,36 @@ async def update_embercore():
             return {"status": "success", "message": "Neustart läuft..."}
         except Exception as e: return {"status": "error", "message": str(e)}
     else:
-        exe_url = "https://github.com/MasterBurns/EmberCore/releases/latest/download/EmberCore.exe"
-        new_exe_path = os.path.join(EXE_DIR, "EmberCore_new.exe")
+        # Hier bedienen wir uns der dynamischen Version für den Download!
+        remote_info = {}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json")
+                if res.status_code == 200: remote_info = res.json()
+        except: pass
+
+        target_version = remote_info.get("version", "")
+        # Fallback falls es kein Tag gibt, greift er auf das latest Release zu
+        exe_url = f"https://github.com/MasterBurns/EmberCore/releases/download/{target_version}/EmberCore_Windows_{target_version}.zip" if target_version else "https://github.com/MasterBurns/EmberCore/releases/latest/download/EmberCore_Windows.zip"
+
+        new_zip_path = os.path.join(EXE_DIR, "EmberCore_update.zip")
         current_exe_path = sys.executable
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(exe_url, timeout=30.0)
+                response = await client.get(exe_url, timeout=60.0, follow_redirects=True)
                 if response.status_code == 200:
-                    with open(new_exe_path, "wb") as f: f.write(response.content)
+                    with open(new_zip_path, "wb") as f: f.write(response.content)
                 else:
-                    return {"status": "error", "message": f"GitHub meldet Status {response.status_code}"}
+                    return {"status": "error", "message": f"GitHub meldet Status {response.status_code} für das ZIP."}
 
             batch_path = os.path.join(EXE_DIR, "update_worker.bat")
             with open(batch_path, "w", encoding="ascii") as f:
                 f.write("@echo off\n")
                 f.write("timeout /t 2 /nobreak > nul\n")
                 f.write(f"del /f /q \"{current_exe_path}\"\n")
-                f.write(f"ren \"{new_exe_path}\" \"{os.path.basename(current_exe_path)}\"\n")
+                f.write(f"powershell -command \"Expand-Archive -Force '{new_zip_path}' '{EXE_DIR}'\"\n")
+                f.write(f"del /f /q \"{new_zip_path}\"\n")
                 f.write(f"start \"\" \"{current_exe_path}\"\n")
                 f.write("del \"%~f0\"\n")
 
@@ -288,11 +344,10 @@ async def update_embercore():
 
             async def kill_switch():
                 await asyncio.sleep(1.0)
-                print("[*] Update-Batch übergeben. EmberCore schließt jetzige Instanz.")
                 sys.exit(0)
             asyncio.create_task(kill_switch())
 
-            return {"status": "success", "message": "Binary erfolgreich heruntergeladen. Führe Tausch aus..."}
+            return {"status": "success", "message": "Binary erfolgreich heruntergeladen. Führe Update aus..."}
         except Exception as e:
             return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
 
@@ -551,9 +606,11 @@ async def get_available_plugins():
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "static"), html=True), name="static")
 
 def main():
+    global ACTIVE_PORT
     port = 8000
     while socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('127.0.0.1', port)) == 0: port += 10
-    print(f"[+] Web-Interface: http://127.0.0.1:{port}")
+    ACTIVE_PORT = port
+    print(f"[*] EmberCore initialisiert auf Port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 if __name__ == "__main__": main()

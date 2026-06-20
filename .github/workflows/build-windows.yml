@@ -27,15 +27,17 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name "EmberCore" --add-data "backend/static;static" --add-data "backend/dev_plugins;dev_plugins" --clean --noconfirm backend/main.py
+        pyinstaller --name "EmberCore" --add-data "backend/static;static" --add-data "backend/dev_plugins;dev_plugins" --add-data "version.json;." --clean --noconfirm backend/main.py
 
+    # HIER GEÄNDERT: Die ZIP-Datei bekommt direkt beim Erstellen die Versionsnummer
     - name: Zip the Output
       run: |
-        Compress-Archive -Path dist\EmberCore\* -DestinationPath EmberCore_Windows.zip
+        Compress-Archive -Path dist\EmberCore\* -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
 
+    # HIER GEÄNDERT: Upload sucht exakt nach dem Namen aus dem Schritt drüber
     - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
-        files: EmberCore_Windows.zip
+        files: EmberCore_Windows_${{ github.ref_name }}.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
