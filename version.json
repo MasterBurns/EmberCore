@@ -5,3 +5,17 @@
     "Windows intergration"
   ]
 }
+{
+  "version": "v0.1.2.1",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "QoL Features"
+  ]
+}
+{
+  "version": "v0.1.2.2",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "UX Server Tab Redesign"
+  ]
+}

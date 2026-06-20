@@ -10,11 +10,11 @@ import subprocess
 import asyncio
 import io
 import zipfile
-import tarfile  # NEU: Falls jemand es doch auf Linux nutzt
+import tarfile
 import httpx
 import re
-import webbrowser  # NEU: Öffnet den Browser automatisch
-import threading   # NEU: Verzögert den Browser-Start leicht
+import webbrowser
+import threading
 from datetime import datetime, date, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body
@@ -44,7 +44,6 @@ DATA_ROOT = os.path.join(EXE_DIR, "data")
 PLUGINS_ROOT = os.path.join(EXE_DIR, "plugins")
 DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else os.path.join(EXE_DIR, "dev_plugins")
 
-# Globale Variable für den Port, damit der Browser weiß, wohin er muss
 ACTIVE_PORT = 8000
 
 def get_current_system_version():
@@ -61,6 +60,73 @@ manager = ServerManager()
 steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
 config_manager = ConfigManager()
+
+def parse_live_config_file(file_path: str) -> dict:
+    values = {}
+    if not os.path.exists(file_path): return values
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
+                if match:
+                    key = match.group(1).strip()
+                    val = match.group(2).strip()
+                    if val.startswith('"') and val.endswith('"'): val = val[1:-1]
+                    if val.startswith("'") and val.endswith("'"): val = val[1:-1]
+                    values[key] = val
+    except Exception as e:
+        print(f"[-] Fehler beim Lesen der Live-Config: {e}")
+    return values
+
+def guess_type_and_normalize(val_str: str):
+    val_clean = str(val_str).strip()
+    if val_clean.lower() in ["true", "false"]: return "boolean", val_clean.lower() == "true"
+    try:
+        if "." in val_clean: return "number", float(val_clean)
+        return "number", int(val_clean)
+    except ValueError:
+        return "text", val_str
+
+def apply_desired_config_to_live(plugin_id: str):
+    manifest = load_manifest(plugin_id)
+    if not manifest: return
+    meta = manifest.get("config_meta")
+    if not meta: return
+
+    desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+    if not os.path.exists(desired_path): return
+
+    with open(desired_path, "r", encoding="utf-8") as f: desired_values = json.load(f)
+    live_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+
+    if not os.path.exists(live_path):
+        os.makedirs(os.path.dirname(live_path), exist_ok=True)
+        lines = []
+    else:
+        with open(live_path, "r", encoding="utf-8", errors="ignore") as f: lines = f.readlines()
+
+    updated_keys = set()
+    new_lines = []
+
+    for line in lines:
+        match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
+        if match:
+            key = match.group(1).strip()
+            if key in desired_values:
+                val = desired_values[key]
+                if isinstance(val, bool): val = "True" if val else "False"
+                new_lines.append(f"{key}={val}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    for key, val in desired_values.items():
+        if key not in updated_keys:
+            if isinstance(val, bool): val = "True" if val else "False"
+            new_lines.append(f"{key}={val}\n")
+
+    with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
+
 
 class CompiledSafeScheduler(BackupScheduler):
     async def _check_and_run_backups(self):
@@ -112,10 +178,8 @@ class CompiledSafeScheduler(BackupScheduler):
                     except: pass
 
             if backup_needed:
-                manifest_path = os.path.join(DEV_PLUGINS_ROOT, plugin_id, "manifest.yaml")
-                if not os.path.exists(manifest_path): manifest_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
-                if os.path.exists(manifest_path):
-                    with open(manifest_path, "r", encoding="utf-8") as mf: manifest = yaml.safe_load(mf)
+                manifest = load_manifest(plugin_id)
+                if manifest:
                     backup_config = manifest.get("backup")
                     if backup_config:
                         self.backup_manager.create_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), backup_config.get("source_path"), retention)
@@ -163,7 +227,6 @@ async def game_update_checker_loop():
         except: pass
         await asyncio.sleep(3600)
 
-# --- NEU: STEAMCMD AUTO-DOWNLOADER ---
 async def prepare_steamcmd():
     steam_dir = os.path.join(SERVERS_ROOT, "steamcmd")
     os.makedirs(steam_dir, exist_ok=True)
@@ -187,19 +250,14 @@ async def prepare_steamcmd():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Zuerst SteamCMD prüfen und ggf. herunterladen
     await prepare_steamcmd()
-
-    # 2. Hintergrund-Tasks starten
     asyncio.create_task(scheduler.start_loop())
     asyncio.create_task(game_update_checker_loop())
 
-    # 3. Browser nach 1,5 Sekunden Verzögerung automatisch öffnen
     def open_browser():
         print(f"[+] Öffne EmberCore Dashboard im Browser...")
         webbrowser.open(f"http://127.0.0.1:{ACTIVE_PORT}")
     threading.Timer(1.5, open_browser).start()
-
     yield
 
 app = FastAPI(title="EmberCore", version=system_info["version"], lifespan=lifespan)
@@ -307,7 +365,6 @@ async def update_embercore():
             return {"status": "success", "message": "Neustart läuft..."}
         except Exception as e: return {"status": "error", "message": str(e)}
     else:
-        # Hier bedienen wir uns der dynamischen Version für den Download!
         remote_info = {}
         try:
             async with httpx.AsyncClient() as client:
@@ -316,9 +373,7 @@ async def update_embercore():
         except: pass
 
         target_version = remote_info.get("version", "")
-        # Fallback falls es kein Tag gibt, greift er auf das latest Release zu
         exe_url = f"https://github.com/MasterBurns/EmberCore/releases/download/{target_version}/EmberCore_Windows_{target_version}.zip" if target_version else "https://github.com/MasterBurns/EmberCore/releases/latest/download/EmberCore_Windows.zip"
-
         new_zip_path = os.path.join(EXE_DIR, "EmberCore_update.zip")
         current_exe_path = sys.executable
 
@@ -341,15 +396,12 @@ async def update_embercore():
                 f.write("del \"%~f0\"\n")
 
             subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
-
             async def kill_switch():
                 await asyncio.sleep(1.0)
                 sys.exit(0)
             asyncio.create_task(kill_switch())
-
             return {"status": "success", "message": "Binary erfolgreich heruntergeladen. Führe Update aus..."}
-        except Exception as e:
-            return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
+        except Exception as e: return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
 
 @app.get("/api/plugins/installed")
 def get_installed_plugins():
@@ -368,12 +420,18 @@ def get_installed_plugins():
                     server_name = plugin_id
                     meta = data.get("config_meta")
                     if meta:
-                        file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+                        desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+                        live_values = {}
+                        if os.path.exists(desired_path):
+                            with open(desired_path, "r", encoding="utf-8") as df: live_values = json.load(df)
+                        else:
+                            file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+                            live_values = parse_live_config_file(file_path)
+
                         fields = meta.get("fields", [])
                         hostname_key = next((f["key"] for f in fields if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
-                        if hostname_key:
-                            values = config_manager.read_key_value_config(file_path, fields)
-                            if values.get(hostname_key): server_name = values.get(hostname_key)
+                        if hostname_key and live_values.get(hostname_key):
+                            server_name = live_values.get(hostname_key)
                     status = "online" if manager.is_running(plugin_id) else "offline"
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
                     installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status})
@@ -404,11 +462,10 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
                 fields = meta.get("fields", [])
                 hostname_key = next((f["key"] for f in fields if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                 if hostname_key:
-                    config_file_path = os.path.join(SERVERS_ROOT, instance_id, meta.get("file_path"))
-                    os.makedirs(os.path.dirname(config_file_path), exist_ok=True)
-                    current_values = config_manager.read_key_value_config(config_file_path, fields)
-                    current_values[hostname_key] = server_name
-                    config_manager.write_key_value_config(config_file_path, current_values)
+                    desired_dir = os.path.join(DATA_ROOT, instance_id)
+                    os.makedirs(desired_dir, exist_ok=True)
+                    with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
+                        json.dump({hostname_key: server_name}, df, indent=2)
         return {"status": "success", "message": f"Server '{server_name}' erstellt.", "instance_id": instance_id}
     except Exception as e:
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
@@ -417,6 +474,7 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
 @app.post("/api/server/install/{plugin_id}")
 def install_server(plugin_id: str, req: InstallRequest = None):
     manifest = load_manifest(plugin_id)
+    if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
     res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
     if plugin_id in game_update_cache:
         game_update_cache[plugin_id]["available"] = False
@@ -429,19 +487,26 @@ async def force_check_game_updates(plugin_id: str):
     if status:
         if status["available"]: return {"status": "success", "message": f"Steam Update verfügbar! ({status['local']} -> {status['remote']})"}
         else: return {"status": "info", "message": f"Bereits aktuell. (Build: {status['local']})"}
-    return {"status": "error", "message": "Konnte Daten nicht prüfen."}
+    return {"status": "error", "message": "Konnte Daten nicht prüfen. Ist der Server bereits installiert?"}
 
 @app.post("/api/server/start/{plugin_id}")
 def start(plugin_id: str):
     manifest = load_manifest(plugin_id)
+    if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
+
     meta = manifest.get("config_meta")
-    if meta:
-        file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
-        values = config_manager.read_key_value_config(file_path, meta.get("fields", []))
-        auto_update = values.get("AutoUpdateOnStart")
-        if auto_update is True or str(auto_update).lower() == "true" or auto_update == 1:
-            steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-            if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
+    auto_update = False
+    desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+    if os.path.exists(desired_path):
+        with open(desired_path, "r", encoding="utf-8") as df:
+            d_vals = json.load(df)
+            auto_update = d_vals.get("AutoUpdateOnStart")
+
+    if auto_update is True or str(auto_update).lower() == "true" or auto_update == 1:
+        steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+        if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
+
+    apply_desired_config_to_live(plugin_id)
 
     executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
     return manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
@@ -478,6 +543,8 @@ def get_diagnostics(plugin_id: str):
 def apply_fix(plugin_id: str, fix_type: str):
     if manager.is_running(plugin_id): manager.stop_server(plugin_id)
     manifest = load_manifest(plugin_id)
+    if not manifest: return {"status": "error", "message": "Manifest nicht gefunden"}
+
     if fix_type == "update_server":
         steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
         return {"status": "success", "message": "Server repariert."}
@@ -530,6 +597,7 @@ async def add_server_mod(plugin_id: str, mod_id: str):
 @app.delete("/api/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
     manifest = load_manifest(plugin_id)
+    if not manifest or "mods_meta" not in manifest: return {"status": "error", "message": "Manifest fehlt oder kein Modding unterstützt"}
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     if not os.path.exists(mods_file): return {"status": "success"}
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
@@ -563,23 +631,92 @@ def open_server_folder(plugin_id: str):
 
 @app.get("/api/server/config/{plugin_id}")
 def get_server_config(plugin_id: str):
-    meta = load_manifest(plugin_id).get("config_meta")
+    manifest = load_manifest(plugin_id)
+    if not manifest: return {"enabled": False}
+    meta = manifest.get("config_meta")
     if not meta: return {"enabled": False}
-    file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
-    return {"enabled": True, "fields": meta.get("fields", []), "values": config_manager.read_key_value_config(file_path, meta.get("fields", []))}
+
+    fields = meta.get("fields", [])
+    known_keys = {f["key"] for f in fields}
+
+    merged_values = {f["key"]: f.get("default") for f in fields}
+
+    live_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+    live_values = parse_live_config_file(live_path)
+
+    for k, v in live_values.items():
+        if k in known_keys: merged_values[k] = v
+
+    desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+    desired_values = {}
+    if os.path.exists(desired_path):
+        try:
+            with open(desired_path, "r", encoding="utf-8") as f:
+                desired_values = json.load(f)
+                for k, v in desired_values.items():
+                    if k in known_keys: merged_values[k] = v
+        except: pass
+
+    unknown_fields = []
+    all_raw_unknowns = {}
+    for k, v in live_values.items():
+        if k not in known_keys: all_raw_unknowns[k] = v
+    for k, v in desired_values.items():
+        if k not in known_keys: all_raw_unknowns[k] = v
+
+    for k, v in all_raw_unknowns.items():
+        guessed_type, normalized_val = guess_type_and_normalize(v)
+        unknown_fields.append({
+            "key": k,
+            "label": f"⚙️ {k} (Dynamisch erkannt)",
+            "type": guessed_type,
+            "is_unknown": True
+        })
+        merged_values[k] = normalized_val
+
+    return {
+        "enabled": True,
+        "fields": fields,
+        "unknown_fields": unknown_fields,
+        "values": merged_values
+    }
 
 @app.post("/api/server/config/{plugin_id}")
 def save_server_config(plugin_id: str, data: dict = Body(...)):
-    meta = load_manifest(plugin_id).get("config_meta")
     manifest = load_manifest(plugin_id)
-    fields = manifest.get("config_meta", {}).get("fields", [])
+    if not manifest: raise HTTPException(status_code=404, detail="Manifest fehlt")
+    meta = manifest.get("config_meta")
+    if not meta: raise HTTPException(status_code=400, detail="Keine Meta-Config.")
+
+    fields = meta.get("fields", [])
     for field in fields:
         key = field["key"]
         if field.get("type") == "boolean" and key in data:
-            if field.get("boolean_mode") == "numeric": data[key] = 1 if data[key] is True or data[key] == 1 else 0
-            else: data[key] = "True" if data[key] is True or str(data[key]).lower() == "true" else "False"
-    file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
-    return config_manager.write_key_value_config(file_path, data)
+            if field.get("boolean_mode") == "numeric":
+                data[key] = 1 if data[key] is True or data[key] == 1 else 0
+            else:
+                data[key] = "True" if data[key] is True or str(data[key]).lower() == "true" else "False"
+
+    desired_dir = os.path.join(DATA_ROOT, plugin_id)
+    os.makedirs(desired_dir, exist_ok=True)
+    desired_path = os.path.join(desired_dir, "desired_config.json")
+
+    current_desired = {}
+    if os.path.exists(desired_path):
+        try:
+            with open(desired_path, "r", encoding="utf-8") as f: current_desired = json.load(f)
+        except: pass
+
+    current_desired.update(data)
+
+    with open(desired_path, "w", encoding="utf-8") as f:
+        json.dump(current_desired, f, indent=2)
+
+    live_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+    if os.path.exists(live_path):
+        apply_desired_config_to_live(plugin_id)
+
+    return {"status": "success", "message": "Soll-Konfiguration gespeichert."}
 
 @app.get("/api/server/backup/schedule/{plugin_id}")
 def get_backup_schedule(plugin_id: str):
