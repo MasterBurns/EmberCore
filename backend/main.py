@@ -1,6 +1,7 @@
 import json
 import socket
 import os
+import sys  # NEU: Für den sauberen Python-Neustart
 import uvicorn
 import yaml
 import platform
@@ -25,6 +26,8 @@ from core.config_manager import ConfigManager
 from core.scheduler import BackupScheduler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Das Hauptverzeichnis des Git-Repos (eine Ebene über backend)
+ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
 manager = ServerManager()
 steam_manager = SteamCMDManager(base_dir=os.path.join(BASE_DIR, "servers"))
@@ -37,7 +40,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler.start_loop())
     yield
 
-app = FastAPI(title="EmberCore", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="EmberCore", version="0.2.0", lifespan=lifespan)
 
 class InstallRequest(BaseModel):
     install_dir_name: Optional[str] = None
@@ -97,6 +100,35 @@ def calculate_disk_trend(plugin_id: str):
         "server_mb": server_mb, "backup_mb": backup_mb, "total_plugin_mb": total_mb,
         "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)
     }
+
+# --- NEU: EMBERCORE SELF-UPDATER ROUTEN ---
+@app.get("/api/system/version")
+def get_system_version():
+    version_file = os.path.join(ROOT_DIR, "version.json")
+    if os.path.exists(version_file):
+        with open(version_file, "r", encoding="utf-8") as f: return json.load(f)
+    return {"version": "v0.1.0", "build_date": "Unknown", "changelog": ["Keine Version-Datei gefunden."]}
+
+@app.post("/api/system/update")
+async def update_embercore():
+    try:
+        # Prüfen ob Git verfügbar ist und pull ausführen
+        subprocess.run(["git", "fetch"], cwd=ROOT_DIR, check=True)
+        pull_result = subprocess.run(["git", "pull"], cwd=ROOT_DIR, capture_output=True, text=True)
+
+        if "Already up to date." in pull_result.stdout:
+            return {"status": "info", "message": "EmberCore ist bereits auf dem neuesten Stand!"}
+
+        # Asynchroner Neustart (damit das Frontend das "success" noch empfängt)
+        async def restart_server():
+            await asyncio.sleep(1.5)
+            print("[*] EmberCore führt Auto-Update Neustart durch...")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        asyncio.create_task(restart_server())
+        return {"status": "success", "message": "Update erfolgreich heruntergeladen. EmberCore startet neu..."}
+    except Exception as e:
+        return {"status": "error", "message": f"Git Update fehlgeschlagen: {e}"}
 
 @app.get("/api/plugins/installed")
 def get_installed_plugins():
@@ -163,11 +195,30 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/api/server/install/{plugin_id}")
+def install_server(plugin_id: str, req: InstallRequest = None):
+    manifest = load_manifest(plugin_id)
+    return steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+
+# --- NEU: GAMESERVER AUTO-UPDATE BEIM START ---
 @app.post("/api/server/start/{plugin_id}")
 def start(plugin_id: str):
     manifest = load_manifest(plugin_id)
-    executable_path = os.path.join(BASE_DIR, "servers", plugin_id, manifest.get("executable_windows"))
-    return manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
+    meta = manifest.get("config_meta")
+
+    # Prüfe den AutoUpdate Schalter in der Config
+    if meta:
+        file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
+        values = config_manager.read_key_value_config(file_path, meta.get("fields", []))
+        auto_update = values.get("AutoUpdateOnStart")
+        if auto_update is True or str(auto_update).lower() == "true" or auto_update == 1:
+            print(f"[*] Auto-Update aktiv! Prüfe SteamCMD für {plugin_id}...")
+            steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+
+    exe_suffix = manifest.get("executable_windows")
+    executable_path = os.path.join(BASE_DIR, "servers", plugin_id, exe_suffix)
+    return manager.start_server(plugin_id, executable_path, manifest)
 
 @app.post("/api/server/stop/{plugin_id}")
 def stop(plugin_id: str): return manager.stop_server(plugin_id)
@@ -210,7 +261,6 @@ def apply_fix(plugin_id: str, fix_type: str):
         return {"status": "success", "message": "Rollback durchgeführt."}
     return {"status": "info", "message": "Manuelle Aktion nötig."}
 
-# --- NEU: DYNAMISCHE MOD-VERWALTUNG ÜBER DIE STEAM-WEB-API ---
 @app.get("/api/server/mods/{plugin_id}")
 def get_server_mods(plugin_id: str):
     mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
@@ -221,16 +271,10 @@ def get_server_mods(plugin_id: str):
 @app.post("/api/server/mods/add/{plugin_id}/{mod_id}")
 async def add_server_mod(plugin_id: str, mod_id: str):
     manifest = load_manifest(plugin_id)
-    if not manifest or "mods_meta" not in manifest:
-        raise HTTPException(status_code=400, detail="Dieses Plugin unterstützt kein Modding.")
-
-    # Frage Live-Details von der offiziellen Steam Web-API ab (kein Token nötig)
+    if not manifest or "mods_meta" not in manifest: raise HTTPException(status_code=400, detail="Kein Modding unterstützt.")
     steam_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
     payload = {"itemcount": 1, "publishedfileids[0]": mod_id}
-
-    mod_name = f"Workshop Mod ({mod_id})"
-    mod_version = "unbekannt"
-
+    mod_name, mod_version = f"Workshop Mod ({mod_id})", "unbekannt"
     try:
         async with httpx.AsyncClient() as client:
             res = await client.post(steam_url, data=payload, timeout=10.0)
@@ -241,52 +285,36 @@ async def add_server_mod(plugin_id: str, mod_id: str):
                     updated_ts = details.get("time_updated", 0)
                     mod_version = datetime.fromtimestamp(updated_ts).strftime("%d.%m.%Y") if updated_ts else "1.0.0"
     except: pass
-
-    # Speichere Metadaten im data Ordner ab
     mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
     os.makedirs(os.path.dirname(mods_file), exist_ok=True)
     current_mods = []
     if os.path.exists(mods_file):
         with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
-
-    if any(m["id"] == mod_id for m in current_mods):
-        return {"status": "error", "message": "Mod ist bereits in der Liste!"}
-
+    if any(m["id"] == mod_id for m in current_mods): return {"status": "error", "message": "Mod existiert bereits!"}
     current_mods.append({"id": mod_id, "name": mod_name, "version": mod_version})
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-
-    # Schreibe den Eintrag in die echte Spieldatei (modlist.txt)
     meta = manifest["mods_meta"]
     real_modlist_path = os.path.join(BASE_DIR, "servers", plugin_id, meta["file_path"])
     os.makedirs(os.path.dirname(real_modlist_path), exist_ok=True)
-
-    # Pfad-Format für Conan Exiles Workshop-Mod Ordner-Struktur
     mod_line = f"*{BASE_DIR}/servers/{plugin_id}/steamapps/workshop/content/{meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak\n"
-
     with open(real_modlist_path, "a", encoding="utf-8") as f: f.write(mod_line)
-    return {"status": "success", "message": f"Mod '{mod_name}' erfolgreich gekoppelt."}
+    return {"status": "success", "message": f"Mod '{mod_name}' hinzugefügt."}
 
 @app.delete("/api/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
     manifest = load_manifest(plugin_id)
     mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
     if not os.path.exists(mods_file): return {"status": "success"}
-
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     current_mods = [m for m in current_mods if m["id"] != mod_id]
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-
-    # Aktualisiere die Spieldatei (modlist.txt)
     meta = manifest["mods_meta"]
     real_modlist_path = os.path.join(BASE_DIR, "servers", plugin_id, meta["file_path"])
     if os.path.exists(real_modlist_path):
         with open(real_modlist_path, "r", encoding="utf-8") as f: lines = f.readlines()
-        # Filter den gelöschten Pfad heraus
         lines = [line for line in lines if f"/{mod_id}/" not in line]
         with open(real_modlist_path, "w", encoding="utf-8") as f: f.writelines(lines)
-
     return {"status": "success", "message": "Mod entfernt."}
-
 
 @app.delete("/api/server/delete/{plugin_id}")
 def delete_server_files(plugin_id: str):
@@ -316,8 +344,6 @@ def get_server_config(plugin_id: str):
 @app.post("/api/server/config/{plugin_id}")
 def save_server_config(plugin_id: str, data: dict = Body(...)):
     meta = load_manifest(plugin_id).get("config_meta")
-
-    # Typen-Normalisierung für das Schreiben (Konvertiert JS-Booleans zurück in INI-Format)
     manifest = load_manifest(plugin_id)
     fields = manifest.get("config_meta", {}).get("fields", [])
     for field in fields:
@@ -327,7 +353,6 @@ def save_server_config(plugin_id: str, data: dict = Body(...)):
                 data[key] = 1 if data[key] is True or data[key] == 1 else 0
             else:
                 data[key] = "True" if data[key] is True or str(data[key]).lower() == "true" else "False"
-
     file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
     return config_manager.write_key_value_config(file_path, data)
 

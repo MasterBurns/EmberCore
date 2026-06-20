@@ -17,6 +17,12 @@ mods_meta:
   workshop_url_template: "https://steamcommunity.com/sharedfiles/filedetails/?id="
   steam_workshop_appid: 443030 # Conan Exiles nutzt die Hauptspiel-ID für den Workshop
 
+- key: "AutoUpdateOnStart"
+      label: "SteamCMD Auto-Update beim Serverstart"
+      type: "boolean"
+      boolean_mode: "text" # Speichert intern True/False
+      default: "True"
+
 # --- Fehler-Erkennungsmuster für die Log-Analyse ---
 diagnostics:
   - id: "port_in_use"
