@@ -12,7 +12,7 @@ import io
 import zipfile
 import httpx
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
@@ -25,27 +25,101 @@ from core.backup_manager import BackupManager
 from core.config_manager import ConfigManager
 from core.scheduler import BackupScheduler
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
+# --- CRITICAL PYINSTALLER PATH RESOLUTION ---
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    BASE_DIR = sys._MEIPASS
+    EXE_DIR = os.path.dirname(sys.executable)
+    IS_COMPILED = True
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    EXE_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
+    IS_COMPILED = False
+
+SERVERS_ROOT = os.path.join(EXE_DIR, "servers")
+BACKUPS_ROOT = os.path.join(EXE_DIR, "backups")
+DATA_ROOT = os.path.join(EXE_DIR, "data")
+PLUGINS_ROOT = os.path.join(EXE_DIR, "plugins")
+DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else os.path.join(EXE_DIR, "dev_plugins")
 
 manager = ServerManager()
-steam_manager = SteamCMDManager(base_dir=os.path.join(BASE_DIR, "servers"))
-backup_manager = BackupManager(base_dir=BASE_DIR)
+steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
+backup_manager = BackupManager(base_dir=EXE_DIR)
 config_manager = ConfigManager()
-scheduler = BackupScheduler(base_dir=BASE_DIR, backup_manager=backup_manager)
 
-# --- NEU: STEAMCMD UPDATE-CHECKER LOGIK ---
+class CompiledSafeScheduler(BackupScheduler):
+    async def _check_and_run_backups(self):
+        plugin_ids = set()
+        for folder in [PLUGINS_ROOT, DEV_PLUGINS_ROOT]:
+            if os.path.exists(folder):
+                for p_id in os.listdir(folder):
+                    if os.path.isdir(os.path.join(folder, p_id)): plugin_ids.add(p_id)
+
+        for plugin_id in plugin_ids:
+            schedule_file = os.path.join(DATA_ROOT, plugin_id, "backup_schedule.json")
+            if not os.path.exists(schedule_file): continue
+            with open(schedule_file, "r", encoding="utf-8") as f: config = json.load(f)
+
+            schedules = config.get("schedules", [])
+            retention = config.get("retention", {})
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+
+            backup_needed = False
+            schedules_updated = False
+
+            for sched in schedules:
+                stype = sched.get("type")
+                val = sched.get("value")
+                if stype == "interval":
+                    try:
+                        hours = int(val)
+                        last_run_str = sched.get("last_run", "")
+                        if not last_run_str:
+                            backup_needed = True
+                            sched["last_run"] = now.isoformat()
+                            schedules_updated = True
+                        else:
+                            last_run = datetime.fromisoformat(last_run_str)
+                            if now >= last_run + timedelta(hours=hours):
+                                backup_needed = True
+                                sched["last_run"] = now.isoformat()
+                                schedules_updated = True
+                    except: pass
+                elif stype == "daily":
+                    try:
+                        th, tm = map(int, val.split(":"))
+                        last_run_date = sched.get("last_run_date", "")
+                        if last_run_date != today_str:
+                            if now.hour > th or (now.hour == th and now.minute >= tm):
+                                backup_needed = True
+                                sched["last_run_date"] = today_str
+                                schedules_updated = True
+                    except: pass
+
+            if backup_needed:
+                manifest_path = os.path.join(DEV_PLUGINS_ROOT, plugin_id, "manifest.yaml")
+                if not os.path.exists(manifest_path): manifest_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
+                if os.path.exists(manifest_path):
+                    with open(manifest_path, "r", encoding="utf-8") as mf: manifest = yaml.safe_load(mf)
+                    backup_config = manifest.get("backup")
+                    if backup_config:
+                        self.backup_manager.create_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), backup_config.get("source_path"), retention)
+            if schedules_updated:
+                os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
+                with open(schedule_file, "w", encoding="utf-8") as f: json.dump(config, f, indent=2)
+
+scheduler = CompiledSafeScheduler(base_dir=EXE_DIR, backup_manager=backup_manager)
+
 game_update_cache = {}
 
 async def fetch_game_update_status(plugin_id: str):
     manifest = load_manifest(plugin_id)
     if not manifest or manifest.get("engine") != "steamcmd": return None
-
     app_id = manifest.get("steam_app_id")
     if not app_id: return None
 
     local_id = "0"
-    acf_path = os.path.join(BASE_DIR, "servers", plugin_id, "steamapps", f"appmanifest_{app_id}.acf")
+    acf_path = os.path.join(SERVERS_ROOT, plugin_id, "steamapps", f"appmanifest_{app_id}.acf")
     if os.path.exists(acf_path):
         with open(acf_path, "r", encoding="utf-8") as f:
             match = re.search(r'"buildid"\s+"(\d+)"', f.read(), re.IGNORECASE)
@@ -56,30 +130,22 @@ async def fetch_game_update_status(plugin_id: str):
             async with httpx.AsyncClient() as client:
                 res = await client.get(f"https://api.steamcmd.net/v1/info/{app_id}", timeout=10.0)
                 if res.status_code == 200:
-                    data = res.json()
-                    remote_id = data.get("data", {}).get(str(app_id), {}).get("depots", {}).get("branches", {}).get("public", {}).get("buildid")
+                    remote_id = res.json().get("data", {}).get(str(app_id), {}).get("depots", {}).get("branches", {}).get("public", {}).get("buildid")
                     if remote_id:
-                        status = {
-                            "available": str(local_id) != str(remote_id),
-                            "local": str(local_id),
-                            "remote": str(remote_id)
-                        }
+                        status = {"available": str(local_id) != str(remote_id), "local": str(local_id), "remote": str(remote_id)}
                         game_update_cache[plugin_id] = status
                         return status
-        except Exception as e:
-            pass
+        except: pass
     return None
 
 async def game_update_checker_loop():
     await asyncio.sleep(10)
-    print("[*] SteamCMD Update-Radar gestartet (Prüfung stündlich).")
+    print("[*] SteamCMD Update-Radar gestartet.")
     while True:
         try:
             installed = get_installed_plugins()
-            for plugin in installed:
-                await fetch_game_update_status(plugin["id"])
-        except Exception as e:
-            pass
+            for plugin in installed: await fetch_game_update_status(plugin["id"])
+        except: pass
         await asyncio.sleep(3600)
 
 @asynccontextmanager
@@ -90,22 +156,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="EmberCore", version="0.2.0", lifespan=lifespan)
 
-class InstallRequest(BaseModel):
-    install_dir_name: Optional[str] = None
+class InstallRequest(BaseModel): install_dir_name: Optional[str] = None
 
 disk_cache = {}
 
-def get_plugin_paths(plugin_id: str):
-    dev_path = os.path.join(BASE_DIR, "dev_plugins", plugin_id, "manifest.yaml")
-    live_path = os.path.join(BASE_DIR, "plugins", plugin_id, "manifest.yaml")
-    if os.path.exists(dev_path): return dev_path, os.path.join(BASE_DIR, "dev_plugins", plugin_id), True
-    return live_path, os.path.join(BASE_DIR, "plugins", plugin_id), False
-
-def load_manifest(plugin_id: str):
-    manifest_path, _, _ = get_plugin_paths(plugin_id)
-    if not os.path.exists(manifest_path): return None
-    with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
-
+# --- FEHLENDE FUNKTIONEN HINZUGEFÜGT ---
 def get_dir_size_mb(path):
     total = 0
     if os.path.exists(path):
@@ -120,78 +175,133 @@ def calculate_disk_trend(plugin_id: str):
     if plugin_id in disk_cache:
         cached_data, last_check = disk_cache[plugin_id]
         if (now - last_check).total_seconds() < 60: return cached_data
-    server_dir = os.path.join(BASE_DIR, "servers", plugin_id)
-    backup_dir = os.path.join(BASE_DIR, "backups", plugin_id)
+
+    server_dir = os.path.join(SERVERS_ROOT, plugin_id)
+    backup_dir = os.path.join(BACKUPS_ROOT, plugin_id)
     server_mb = get_dir_size_mb(server_dir)
     backup_mb = get_dir_size_mb(backup_dir)
     total_mb = server_mb + backup_mb
-    trend_file = os.path.join(BASE_DIR, "data", plugin_id, "storage_trend.json")
+
+    trend_file = os.path.join(DATA_ROOT, plugin_id, "storage_trend.json")
     os.makedirs(os.path.dirname(trend_file), exist_ok=True)
     trend_data = {}
     if os.path.exists(trend_file):
         try:
             with open(trend_file, "r") as f: trend_data = json.load(f)
         except: pass
+
     today_str = str(date.today())
     trend_data[today_str] = total_mb
     sorted_dates = sorted(trend_data.keys())
     if len(sorted_dates) > 7: del trend_data[sorted_dates[0]]
+
     with open(trend_file, "w") as f: json.dump(trend_data, f)
+
     trend_mb_per_day = 0
     if len(sorted_dates) > 1:
         oldest_mb = trend_data[sorted_dates[0]]
         newest_mb = trend_data[sorted_dates[-1]]
         days_diff = (datetime.strptime(sorted_dates[-1], "%Y-%m-%d") - datetime.strptime(sorted_dates[0], "%Y-%m-%d")).days
         if days_diff > 0: trend_mb_per_day = round((newest_mb - oldest_mb) / days_diff, 2)
-    total_disk, used_disk, free_disk = shutil.disk_usage(BASE_DIR)
-    return {
+
+    total_disk, used_disk, free_disk = shutil.disk_usage(EXE_DIR)
+    result = {
         "server_mb": server_mb, "backup_mb": backup_mb, "total_plugin_mb": total_mb,
         "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)
     }
+    disk_cache[plugin_id] = (result, now)
+    return result
+
+def get_plugin_paths(plugin_id: str):
+    dev_path = os.path.join(DEV_PLUGINS_ROOT, plugin_id, "manifest.yaml")
+    live_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
+    if os.path.exists(dev_path): return dev_path, os.path.join(DEV_PLUGINS_ROOT, plugin_id), True
+    return live_path, os.path.join(PLUGINS_ROOT, plugin_id), False
+
+def load_manifest(plugin_id: str):
+    manifest_path, _, _ = get_plugin_paths(plugin_id)
+    if not os.path.exists(manifest_path): return None
+    with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
 
 @app.get("/api/system/version")
 def get_system_version():
-    version_file = os.path.join(ROOT_DIR, "version.json")
+    version_file = os.path.join(EXE_DIR, "version.json")
     if os.path.exists(version_file):
         with open(version_file, "r", encoding="utf-8") as f: return json.load(f)
-    return {"version": "v0.1.0", "build_date": "Unknown", "changelog": ["Keine Version-Datei gefunden."]}
+    return {"version": "v0.2.0", "build_date": "2026-06-20", "changelog": ["Compiled Mode aktiv."]}
 
 @app.get("/api/system/check-update")
-def check_system_update():
-    try:
-        subprocess.run(["git", "fetch"], cwd=ROOT_DIR, check=True)
-        status = subprocess.run(["git", "status", "-uno"], cwd=ROOT_DIR, capture_output=True, text=True)
-        is_behind = "Your branch is behind" in status.stdout
-        return {"update_available": is_behind}
-    except Exception as e:
-        return {"update_available": False, "error": str(e)}
+async def check_system_update():
+    if not IS_COMPILED:
+        try:
+            subprocess.run(["git", "fetch"], cwd=EXE_DIR, check=True)
+            status = subprocess.run(["git", "status", "-uno"], cwd=EXE_DIR, capture_output=True, text=True)
+            return {"update_available": "Your branch is behind" in status.stdout}
+        except: return {"update_available": False}
+    else:
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json", timeout=5.0)
+                if res.status_code == 200:
+                    remote_version = res.json().get("version", "")
+                    local_version = get_system_version()["version"]
+                    return {"update_available": remote_version != local_version}
+        except: pass
+        return {"update_available": False}
 
 @app.post("/api/system/update")
 async def update_embercore():
-    try:
-        subprocess.run(["git", "fetch"], cwd=ROOT_DIR, check=True)
-        pull_result = subprocess.run(["git", "pull"], cwd=ROOT_DIR, capture_output=True, text=True)
+    if not IS_COMPILED:
+        try:
+            subprocess.run(["git", "fetch"], cwd=EXE_DIR, check=True)
+            pull_result = subprocess.run(["git", "pull"], cwd=EXE_DIR, capture_output=True, text=True)
+            if "Already up to date." in pull_result.stdout: return {"status": "info", "message": "Bereits aktuell."}
+            async def restart():
+                await asyncio.sleep(1.0)
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            asyncio.create_task(restart())
+            return {"status": "success", "message": "Neustart läuft..."}
+        except Exception as e: return {"status": "error", "message": str(e)}
+    else:
+        exe_url = "https://github.com/MasterBurns/EmberCore/releases/latest/download/EmberCore.exe"
+        new_exe_path = os.path.join(EXE_DIR, "EmberCore_new.exe")
+        current_exe_path = sys.executable
 
-        if "Already up to date." in pull_result.stdout:
-            return {"status": "info", "message": "EmberCore ist bereits auf dem neuesten Stand!"}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(exe_url, timeout=30.0)
+                if response.status_code == 200:
+                    with open(new_exe_path, "wb") as f: f.write(response.content)
+                else:
+                    return {"status": "error", "message": f"GitHub meldet Status {response.status_code}"}
 
-        async def restart_server():
-            await asyncio.sleep(1.5)
-            print("[*] EmberCore führt Auto-Update Neustart durch...")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            batch_path = os.path.join(EXE_DIR, "update_worker.bat")
+            with open(batch_path, "w", encoding="ascii") as f:
+                f.write("@echo off\n")
+                f.write("timeout /t 2 /nobreak > nul\n")
+                f.write(f"del /f /q \"{current_exe_path}\"\n")
+                f.write(f"ren \"{new_exe_path}\" \"{os.path.basename(current_exe_path)}\"\n")
+                f.write(f"start \"\" \"{current_exe_path}\"\n")
+                f.write("del \"%~f0\"\n")
 
-        asyncio.create_task(restart_server())
-        return {"status": "success", "message": "Update erfolgreich heruntergeladen. EmberCore startet neu..."}
-    except Exception as e:
-        return {"status": "error", "message": f"Git Update fehlgeschlagen: {e}"}
+            subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+            async def kill_switch():
+                await asyncio.sleep(1.0)
+                print("[*] Update-Batch übergeben. EmberCore schließt jetzige Instanz.")
+                sys.exit(0)
+            asyncio.create_task(kill_switch())
+
+            return {"status": "success", "message": "Binary erfolgreich heruntergeladen. Führe Tausch aus..."}
+        except Exception as e:
+            return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
 
 @app.get("/api/plugins/installed")
 def get_installed_plugins():
-    dirs_to_scan = [("dev_plugins", True), ("plugins", False)]
+    dirs_to_scan = [(DEV_PLUGINS_ROOT, True), (PLUGINS_ROOT, False)]
     installed = []
     seen_ids = set()
-    for folder_name, is_dev in dirs_to_scan:
-        target_dir = os.path.join(BASE_DIR, folder_name)
+    for target_dir, is_dev in dirs_to_scan:
         if not os.path.exists(target_dir): continue
         for plugin_id in os.listdir(target_dir):
             if plugin_id in seen_ids: continue
@@ -203,7 +313,7 @@ def get_installed_plugins():
                     server_name = plugin_id
                     meta = data.get("config_meta")
                     if meta:
-                        file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
+                        file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
                         fields = meta.get("fields", [])
                         hostname_key = next((f["key"] for f in fields if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                         if hostname_key:
@@ -221,9 +331,8 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', server_name).strip('_').lower()
     if not safe_name: safe_name = "server"
     instance_id = f"{plugin_id}_{safe_name}"
-    plugins_dir = os.path.join(BASE_DIR, "plugins")
-    if os.path.exists(os.path.join(plugins_dir, instance_id)): return {"status": "error", "message": "Server-ID existiert bereits!"}
-    instance_dir = os.path.join(plugins_dir, instance_id)
+    if os.path.exists(os.path.join(PLUGINS_ROOT, instance_id)): return {"status": "error", "message": "Server-ID existiert bereits!"}
+    instance_dir = os.path.join(PLUGINS_ROOT, instance_id)
     os.makedirs(instance_dir, exist_ok=True)
     try:
         async with httpx.AsyncClient() as client:
@@ -240,7 +349,7 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
                 fields = meta.get("fields", [])
                 hostname_key = next((f["key"] for f in fields if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                 if hostname_key:
-                    config_file_path = os.path.join(BASE_DIR, "servers", instance_id, meta.get("file_path"))
+                    config_file_path = os.path.join(SERVERS_ROOT, instance_id, meta.get("file_path"))
                     os.makedirs(os.path.dirname(config_file_path), exist_ok=True)
                     current_values = config_manager.read_key_value_config(config_file_path, fields)
                     current_values[hostname_key] = server_name
@@ -263,28 +372,23 @@ def install_server(plugin_id: str, req: InstallRequest = None):
 async def force_check_game_updates(plugin_id: str):
     status = await fetch_game_update_status(plugin_id)
     if status:
-        if status["available"]:
-            return {"status": "success", "message": f"Steam Update verfügbar! (Lokal: {status['local']} -> Remote: {status['remote']})"}
-        else:
-            return {"status": "info", "message": f"Der Server ist bereits auf dem neuesten Stand. (Build: {status['local']})"}
-    return {"status": "error", "message": "Konnte Versionsdaten nicht prüfen. Server evtl. noch nicht installiert?"}
+        if status["available"]: return {"status": "success", "message": f"Steam Update verfügbar! ({status['local']} -> {status['remote']})"}
+        else: return {"status": "info", "message": f"Bereits aktuell. (Build: {status['local']})"}
+    return {"status": "error", "message": "Konnte Daten nicht prüfen."}
 
 @app.post("/api/server/start/{plugin_id}")
 def start(plugin_id: str):
     manifest = load_manifest(plugin_id)
     meta = manifest.get("config_meta")
-
     if meta:
-        file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
+        file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
         values = config_manager.read_key_value_config(file_path, meta.get("fields", []))
         auto_update = values.get("AutoUpdateOnStart")
         if auto_update is True or str(auto_update).lower() == "true" or auto_update == 1:
-            print(f"[*] Auto-Update aktiv! Prüfe SteamCMD für {plugin_id}...")
             steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
             if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
 
-    exe_suffix = manifest.get("executable_windows")
-    executable_path = os.path.join(BASE_DIR, "servers", plugin_id, exe_suffix)
+    executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
     return manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
 
 @app.post("/api/server/stop/{plugin_id}")
@@ -325,13 +429,13 @@ def apply_fix(plugin_id: str, fix_type: str):
     elif fix_type == "restore_backup":
         backups = backup_manager.list_backups(plugin_id)
         if not backups: return {"status": "error", "message": "Kein Backup gefunden!"}
-        backup_manager.restore_backup(plugin_id, os.path.join(BASE_DIR, "servers", plugin_id), manifest.get("backup").get("source_path"), backups[0]["filename"])
+        backup_manager.restore_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), manifest.get("backup").get("source_path"), backups[0]["filename"])
         return {"status": "success", "message": "Rollback durchgeführt."}
     return {"status": "info", "message": "Manuelle Aktion nötig."}
 
 @app.get("/api/server/mods/{plugin_id}")
 def get_server_mods(plugin_id: str):
-    mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
+    mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     if os.path.exists(mods_file):
         with open(mods_file, "r", encoding="utf-8") as f: return json.load(f)
     return []
@@ -353,7 +457,7 @@ async def add_server_mod(plugin_id: str, mod_id: str):
                     updated_ts = details.get("time_updated", 0)
                     mod_version = datetime.fromtimestamp(updated_ts).strftime("%d.%m.%Y") if updated_ts else "1.0.0"
     except: pass
-    mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
+    mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     os.makedirs(os.path.dirname(mods_file), exist_ok=True)
     current_mods = []
     if os.path.exists(mods_file):
@@ -362,22 +466,22 @@ async def add_server_mod(plugin_id: str, mod_id: str):
     current_mods.append({"id": mod_id, "name": mod_name, "version": mod_version})
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
     meta = manifest["mods_meta"]
-    real_modlist_path = os.path.join(BASE_DIR, "servers", plugin_id, meta["file_path"])
+    real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, meta["file_path"])
     os.makedirs(os.path.dirname(real_modlist_path), exist_ok=True)
-    mod_line = f"*{BASE_DIR}/servers/{plugin_id}/steamapps/workshop/content/{meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak\n"
+    mod_line = f"*{SERVERS_ROOT}/{plugin_id}/steamapps/workshop/content/{meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak\n"
     with open(real_modlist_path, "a", encoding="utf-8") as f: f.write(mod_line)
     return {"status": "success", "message": f"Mod '{mod_name}' hinzugefügt."}
 
 @app.delete("/api/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
     manifest = load_manifest(plugin_id)
-    mods_file = os.path.join(BASE_DIR, "data", plugin_id, "mods_db.json")
+    mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     if not os.path.exists(mods_file): return {"status": "success"}
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     current_mods = [m for m in current_mods if m["id"] != mod_id]
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
     meta = manifest["mods_meta"]
-    real_modlist_path = os.path.join(BASE_DIR, "servers", plugin_id, meta["file_path"])
+    real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, meta["file_path"])
     if os.path.exists(real_modlist_path):
         with open(real_modlist_path, "r", encoding="utf-8") as f: lines = f.readlines()
         lines = [line for line in lines if f"/{mod_id}/" not in line]
@@ -387,16 +491,16 @@ def delete_server_mod(plugin_id: str, mod_id: str):
 @app.delete("/api/server/delete/{plugin_id}")
 def delete_server_files(plugin_id: str):
     if manager.is_running(plugin_id): raise HTTPException(status_code=400, detail="Server läuft!")
-    if os.path.exists(os.path.join(BASE_DIR, "servers", plugin_id)): shutil.rmtree(os.path.join(BASE_DIR, "servers", plugin_id))
-    if os.path.exists(os.path.join(BASE_DIR, "backups", plugin_id)): shutil.rmtree(os.path.join(BASE_DIR, "backups", plugin_id))
-    if os.path.exists(os.path.join(BASE_DIR, "data", plugin_id)): shutil.rmtree(os.path.join(BASE_DIR, "data", plugin_id))
+    if os.path.exists(os.path.join(SERVERS_ROOT, plugin_id)): shutil.rmtree(os.path.join(SERVERS_ROOT, plugin_id))
+    if os.path.exists(os.path.join(BACKUPS_ROOT, plugin_id)): shutil.rmtree(os.path.join(BACKUPS_ROOT, plugin_id))
+    if os.path.exists(os.path.join(DATA_ROOT, plugin_id)): shutil.rmtree(os.path.join(DATA_ROOT, plugin_id))
     _, plugin_dir, is_dev = get_plugin_paths(plugin_id)
     if os.path.exists(plugin_dir) and not is_dev: shutil.rmtree(plugin_dir)
     return {"status": "success", "message": "Dateien entfernt."}
 
 @app.post("/api/server/open-folder/{plugin_id}")
 def open_server_folder(plugin_id: str):
-    server_dir = os.path.abspath(os.path.join(BASE_DIR, "servers", plugin_id))
+    server_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))
     os.makedirs(server_dir, exist_ok=True)
     if platform.system() == "Windows": os.startfile(server_dir)
     elif platform.system() == "Linux": subprocess.Popen(["xdg-open", server_dir])
@@ -406,7 +510,7 @@ def open_server_folder(plugin_id: str):
 def get_server_config(plugin_id: str):
     meta = load_manifest(plugin_id).get("config_meta")
     if not meta: return {"enabled": False}
-    file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
+    file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
     return {"enabled": True, "fields": meta.get("fields", []), "values": config_manager.read_key_value_config(file_path, meta.get("fields", []))}
 
 @app.post("/api/server/config/{plugin_id}")
@@ -417,23 +521,21 @@ def save_server_config(plugin_id: str, data: dict = Body(...)):
     for field in fields:
         key = field["key"]
         if field.get("type") == "boolean" and key in data:
-            if field.get("boolean_mode") == "numeric":
-                data[key] = 1 if data[key] is True or data[key] == 1 else 0
-            else:
-                data[key] = "True" if data[key] is True or str(data[key]).lower() == "true" else "False"
-    file_path = os.path.join(BASE_DIR, "servers", plugin_id, meta.get("file_path"))
+            if field.get("boolean_mode") == "numeric": data[key] = 1 if data[key] is True or data[key] == 1 else 0
+            else: data[key] = "True" if data[key] is True or str(data[key]).lower() == "true" else "False"
+    file_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
     return config_manager.write_key_value_config(file_path, data)
 
 @app.get("/api/server/backup/schedule/{plugin_id}")
 def get_backup_schedule(plugin_id: str):
-    schedule_file = os.path.join(BASE_DIR, "data", plugin_id, "backup_schedule.json")
+    schedule_file = os.path.join(DATA_ROOT, plugin_id, "backup_schedule.json")
     if os.path.exists(schedule_file):
         with open(schedule_file, "r", encoding="utf-8") as f: return json.load(f)
     return {"schedules": [], "retention": {"keep_latest": 5, "keep_daily": 7, "keep_weekly": 4, "keep_monthly": 3}}
 
 @app.post("/api/server/backup/schedule/{plugin_id}")
 def save_backup_schedule(plugin_id: str, req: dict = Body(...)):
-    schedule_file = os.path.join(BASE_DIR, "data", plugin_id, "backup_schedule.json")
+    schedule_file = os.path.join(DATA_ROOT, plugin_id, "backup_schedule.json")
     os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
     with open(schedule_file, "w", encoding="utf-8") as f: json.dump(req, f, indent=2)
     return {"status": "success"}
