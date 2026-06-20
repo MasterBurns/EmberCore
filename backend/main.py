@@ -18,6 +18,8 @@ import threading
 import time
 import psutil
 import urllib.request
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, date, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body
@@ -44,13 +46,48 @@ DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else
 ACTIVE_PORT = 8000
 START_TIME = datetime.now()
 
+# =========================================================================
+# SYSTEM CONFIG & LOGGING SETUP
+# =========================================================================
+os.makedirs(DATA_ROOT, exist_ok=True)
+os.makedirs(os.path.join(EXE_DIR, "logs"), exist_ok=True)
+SYS_CONFIG_PATH = os.path.join(DATA_ROOT, "system_config.json")
+
+def load_sys_config():
+    if os.path.exists(SYS_CONFIG_PATH):
+        try:
+            with open(SYS_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {"verbose_logging": False}
+
+sys_config = load_sys_config()
+
+log_file = os.path.join(EXE_DIR, "logs", "embercore.log")
+logger = logging.getLogger("EmberCore")
+logger.setLevel(logging.DEBUG if sys_config.get("verbose_logging") else logging.INFO)
+
+if not logger.handlers:
+    file_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=2, encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(console_handler)
+
+logger.info("========================================")
+logger.info(f"EmberCore Backend gestartet (PID: {os.getpid()})")
+logger.info("========================================")
+# =========================================================================
+
 def check_write_permissions():
     try:
         test_file = os.path.join(EXE_DIR, ".write_test")
         with open(test_file, "w") as f: f.write("test")
         os.remove(test_file)
     except PermissionError:
-        print("\n [SCHWERER FEHLER] FEHLENDE SCHREIBRECHTE!")
+        logger.error("[SCHWERER FEHLER] FEHLENDE SCHREIBRECHTE im Verzeichnis!")
         sys.exit(1)
 
 check_write_permissions()
@@ -109,7 +146,7 @@ def get_current_system_version():
                 elif isinstance(data, dict):
                     data["history"] = [data]
                     return data
-        except Exception as e: pass
+        except Exception as e: logger.error(f"version.json Fehler: {e}")
     return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."], "history": []}
 
 system_info = get_current_system_version()
@@ -130,8 +167,6 @@ class AdoptedProcess:
     def __init__(self, pid):
         self.pid = pid
         self.ps = psutil.Process(pid)
-        # Dummy Streams verhindern Abstürze, wenn der Manager beim Beenden versucht
-        # Konsolenbefehle an den verwaisten Server zu senden!
         self.stdin = DummyStream()
         self.stdout = DummyStream()
         self.stderr = DummyStream()
@@ -161,11 +196,13 @@ class AdoptedProcess:
 
 def get_server_processes(plugin_id: str):
     target_procs = {}
+    verbose = sys_config.get("verbose_logging", False)
     try:
         base_path = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
         server_dir_clean = base_path if base_path.endswith(os.sep) else base_path + os.sep
 
-        # 1. Existierende Prozesse aus dem Manager übernehmen
+        if verbose: logger.debug(f"[Recovery] --- Starte Such-Scan fuer Server '{plugin_id}' --- | Pfad: {server_dir_clean}")
+
         if plugin_id in manager.processes:
             try:
                 parent_proc = psutil.Process(manager.processes[plugin_id].pid)
@@ -173,50 +210,68 @@ def get_server_processes(plugin_id: str):
                     target_procs[parent_proc.pid] = parent_proc
                     for child in parent_proc.children(recursive=True):
                         target_procs[child.pid] = child
+                    return target_procs  # FAST PATH! Spart extrem viel CPU
                 else:
+                    if verbose: logger.debug(f"[Recovery] PID {manager.processes[plugin_id].pid} im Cache ist tot.")
                     del manager.processes[plugin_id]
             except psutil.NoSuchProcess:
+                if verbose: logger.debug("[Recovery] PID aus Cache existiert nicht mehr.")
                 del manager.processes[plugin_id]
 
-        # 2. Globale Suche (Fängt Waisen-Prozesse ein, falls EmberCore abstürzt)
+        scanned = 0
+        matched_count = 0
         for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name', 'cmdline']):
+            scanned += 1
             try:
-                if p.info['pid'] in target_procs: continue
-
                 p_name = str(p.info.get('name') or '').lower()
-                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe"]:
+                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe", "system idle process", "system", "registry"]:
                     continue
 
                 matched = False
+                match_reason = ""
 
                 exe = p.info.get('exe')
-                if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean):
-                    matched = True
+                cwd = p.info.get('cwd')
+                cmdline = p.info.get('cmdline')
 
-                if not matched:
-                    cwd = p.info.get('cwd')
-                    if cwd:
-                        cwd_path = os.path.normcase(os.path.realpath(cwd))
-                        cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
-                        if cwd_path.startswith(server_dir_clean):
-                            matched = True
+                if exe:
+                    exe_clean = os.path.normcase(os.path.realpath(exe))
+                    if exe_clean.startswith(server_dir_clean):
+                        matched = True
+                        match_reason = f"EXE ({exe_clean})"
 
-                if not matched:
-                    cmdline = p.info.get('cmdline')
-                    if cmdline:
-                        cmd_str = " ".join(cmdline).lower()
-                        # Fuzzy Match im CMD String
-                        if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str:
-                            matched = True
+                if not matched and cwd:
+                    cwd_path = os.path.normcase(os.path.realpath(cwd))
+                    cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
+                    if cwd_path.startswith(server_dir_clean):
+                        matched = True
+                        match_reason = f"CWD ({cwd_path})"
+
+                if not matched and cmdline:
+                    # FIX: Keine stummen Crashes mehr durch None-Werte in der cmdline Liste!
+                    cmd_safe = [str(x) for x in cmdline if x is not None]
+                    cmd_str = " ".join(cmd_safe).lower()
+                    if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str:
+                        matched = True
+                        match_reason = f"CMDLINE ({cmd_str})"
 
                 if matched:
                     proc = psutil.Process(p.info['pid'])
                     target_procs[proc.pid] = proc
+                    matched_count += 1
+                    if verbose: logger.debug(f"[Recovery] TREFFER! PID {proc.pid} ({p_name}) adoptiert via {match_reason}")
                     for child in proc.children(recursive=True):
                         try: target_procs[child.pid] = child
                         except: pass
-            except: pass
-    except: pass
+            except psutil.AccessDenied:
+                pass # Access denied ist normal für System-Prozesse
+            except Exception as e:
+                pass
+
+        if verbose and matched_count > 0:
+            logger.debug(f"[Recovery] Scan beendet. {scanned} PIDs gescannt. {matched_count} Haupt-Treffer gefunden.")
+    except Exception as e:
+        logger.error(f"[Recovery] Schwerer Fehler beim Scannen: {str(e)}")
     return target_procs
 
 def is_server_online(plugin_id: str) -> bool:
@@ -225,6 +280,7 @@ def is_server_online(plugin_id: str) -> bool:
         if plugin_id not in manager.processes:
             main_pid = min(procs.keys())
             manager.processes[plugin_id] = AdoptedProcess(main_pid)
+            logger.info(f"[Recovery] Server '{plugin_id}' wurde im Hintergrund entdeckt und adoptiert! (PID: {main_pid})")
         return True
     else:
         if plugin_id in manager.processes:
@@ -348,6 +404,7 @@ class CompiledSafeScheduler(BackupScheduler):
                 if manifest:
                     backup_config = manifest.get("backup")
                     if backup_config:
+                        logger.info(f"Führe geplantes Backup für {plugin_id} aus...")
                         self.backup_manager.create_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), backup_config.get("source_path"), retention)
             if schedules_updated:
                 os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
@@ -399,6 +456,7 @@ async def prepare_steamcmd():
     if not os.path.exists(exe_path):
         url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" if is_windows else "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
         try:
+            logger.info("Lade SteamCMD herunter...")
             async with httpx.AsyncClient() as client:
                 res = await client.get(url, follow_redirects=True, timeout=60.0)
                 if res.status_code == 200:
@@ -496,6 +554,42 @@ def load_manifest(plugin_id: str):
     manifest_path, _, _ = get_plugin_paths(plugin_id)
     if not os.path.exists(manifest_path): return None
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
+
+# --- SYSTEM & LOGGING API ---
+
+@app.get("/api/system/settings")
+def get_sys_settings():
+    return sys_config
+
+@app.post("/api/system/settings")
+def save_sys_settings(data: dict = Body(...)):
+    global sys_config
+    sys_config.update(data)
+    with open(SYS_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(sys_config, f, indent=2)
+    logger.setLevel(logging.DEBUG if sys_config.get("verbose_logging") else logging.INFO)
+    logger.info(f"System-Settings gespeichert. Verbose Logging: {sys_config.get('verbose_logging')}")
+    return {"status": "success"}
+
+@app.get("/api/system/logs")
+def get_sys_logs():
+    try:
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+                return {"logs": "".join(lines[-1000:])}
+    except Exception as e:
+        return {"logs": f"Lese-Fehler: {e}"}
+    return {"logs": "Bisher keine Logs vorhanden."}
+
+@app.post("/api/system/logs/clear")
+def clear_sys_logs():
+    try:
+        with open(log_file, "w", encoding="utf-8") as f: f.write("")
+        logger.info("Logdatei manuell vom User geleert.")
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error"}
 
 @app.get("/api/system/health")
 def system_health():
@@ -713,7 +807,6 @@ def stop_system_service():
         return {"status": "success", "message": "Service-Stopp wurde angefordert."}
     except Exception as e: return {"status": "error", "message": str(e)}
 
-
 @app.get("/api/system/version")
 def get_system_version():
     return get_current_system_version()
@@ -807,17 +900,24 @@ async def update_embercore():
                 batch_path = os.path.join(EXE_DIR, "update_worker.bat")
                 with open(batch_path, "w", encoding="ascii") as f:
                     f.write("@echo off\n")
+                    f.write("echo [EmberCore Updater] Warte auf Beendigung des Hauptprozesses...\n")
                     f.write("timeout /t 2 /nobreak > nul\n")
+                    if "--service" in sys.argv:
+                        f.write("echo [EmberCore Updater] Stoppe Windows Service...\n")
+                        f.write("sc stop EmberCore > nul 2>&1\n")
+                        f.write("timeout /t 5 /nobreak > nul\n")
                     f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
                     f.write("timeout /t 2 /nobreak > nul\n")
-                    f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\"\n")
+                    f.write("echo [EmberCore Updater] Entpacke neues Update...\n")
+                    f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\" > nul 2>&1\n")
                     f.write(f"del /f /q \"{archive_path}\"\n")
+                    f.write("echo [EmberCore Updater] Starte System neu...\n")
                     if "--service" in sys.argv:
-                        f.write(f"sc start EmberCore\n")
+                        f.write(f"sc start EmberCore > nul 2>&1\n")
                     else:
                         f.write(f"start \"\" \"{current_exe_path}\" {' '.join(sys.argv[1:])}\n")
                     f.write("del \"%~f0\"\n")
-                subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0)
+                subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0)
 
             async def kill_switch():
                 await asyncio.sleep(1.0)
@@ -942,7 +1042,6 @@ def start(plugin_id: str):
 
 @app.post("/api/server/stop/{plugin_id}")
 def stop(plugin_id: str):
-    # Gnadenloser System-Kill für verwaiste Prozesse!
     procs = get_server_processes(plugin_id)
     for p in procs.values():
         try:
@@ -1312,7 +1411,13 @@ def main():
     port = 8000
     while socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('127.0.0.1', port)) == 0: port += 10
     ACTIVE_PORT = port
-    print(f"[*] EmberCore initialisiert auf Port {port}...")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
+    # Reduziert Uvicorn Log-Spam, wenn Verbose deaktiviert ist
+    log_config = uvicorn.config.LOGGING_CONFIG
+    if not sys_config.get("verbose_logging"):
+        log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
+
+    logger.info(f"[*] EmberCore startet Webserver auf Port {port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_config=log_config)
 
 if __name__ == "__main__": main()
