@@ -15,18 +15,15 @@ import httpx
 import re
 import webbrowser
 import threading
+import time
+import psutil
+import urllib.request
 from datetime import datetime, date, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
-
-from core.server_manager import ServerManager
-from core.steamcmd_manager import SteamCMDManager
-from core.backup_manager import BackupManager
-from core.config_manager import ConfigManager
-from core.scheduler import BackupScheduler
 
 # --- CRITICAL PYINSTALLER PATH RESOLUTION ---
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -45,17 +42,76 @@ PLUGINS_ROOT = os.path.join(EXE_DIR, "plugins")
 DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else os.path.join(EXE_DIR, "dev_plugins")
 
 ACTIVE_PORT = 8000
+START_TIME = datetime.now()
+
+def get_launch_command(mode="normal"):
+    cmd = [sys.executable] if IS_COMPILED else [sys.executable, os.path.abspath(sys.argv[0])]
+    if mode == "watchdog": cmd.append("--watchdog")
+    elif mode == "service" or "--service" in sys.argv:
+        if "--service" not in cmd: cmd.append("--service")
+    return cmd
+
+# --- WATCHDOG INTERCEPT ---
+if "--watchdog" in sys.argv:
+    try:
+        port = int(sys.argv[sys.argv.index("--watchdog") + 1])
+        parent_pid = int(sys.argv[sys.argv.index("--watchdog") + 2])
+    except: sys.exit(1)
+
+    print(f"[Watchdog] 🛡️ Gestartet. Überwache PID {parent_pid} auf Port {port}...")
+    time.sleep(15)
+    fails = 0
+
+    while True:
+        if not psutil.pid_exists(parent_pid):
+            print("[Watchdog] ⚠️ Hauptprozess beendet. Warte 30s Grace Period...")
+            time.sleep(30)
+            if not psutil.pid_exists(parent_pid):
+                print("[Watchdog] Starte Hauptprozess neu...")
+                flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+                subprocess.Popen(get_launch_command(), cwd=EXE_DIR, creationflags=flags)
+            sys.exit(0)
+
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/system/health", timeout=5).read()
+            fails = 0
+        except Exception:
+            fails += 1
+            print(f"[Watchdog] ⏳ Keine Antwort vom Hauptprozess ({fails}/4)")
+            if fails >= 4:
+                print("[Watchdog] 🚨 Hauptprozess HÄNGT! Führe Kill & Restart durch...")
+                try: psutil.Process(parent_pid).kill()
+                except: pass
+                time.sleep(2)
+                flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+                subprocess.Popen(get_launch_command(), cwd=EXE_DIR, creationflags=flags)
+                sys.exit(0)
+        time.sleep(15)
+
+from core.server_manager import ServerManager
+from core.steamcmd_manager import SteamCMDManager
+from core.backup_manager import BackupManager
+from core.config_manager import ConfigManager
+from core.scheduler import BackupScheduler
 
 def get_current_system_version():
     v_path = os.path.join(BASE_DIR, "version.json") if IS_COMPILED else os.path.join(EXE_DIR, "version.json")
     if os.path.exists(v_path):
         try:
-            with open(v_path, "r", encoding="utf-8") as f: return json.load(f)
-        except: pass
-    return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."]}
+            with open(v_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    latest = data[0].copy()
+                    latest["history"] = data
+                    return latest
+                elif isinstance(data, dict):
+                    data["history"] = [data]
+                    return data
+        except Exception as e:
+            print(f"[-] version.json Parser-Fehler: {e}")
+    return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."], "history": []}
 
 system_info = get_current_system_version()
-
 manager = ServerManager()
 steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
@@ -74,8 +130,7 @@ def parse_live_config_file(file_path: str) -> dict:
                     if val.startswith('"') and val.endswith('"'): val = val[1:-1]
                     if val.startswith("'") and val.endswith("'"): val = val[1:-1]
                     values[key] = val
-    except Exception as e:
-        print(f"[-] Fehler beim Lesen der Live-Config: {e}")
+    except: pass
     return values
 
 def guess_type_and_normalize(val_str: str):
@@ -84,15 +139,13 @@ def guess_type_and_normalize(val_str: str):
     try:
         if "." in val_clean: return "number", float(val_clean)
         return "number", int(val_clean)
-    except ValueError:
-        return "text", val_str
+    except ValueError: return "text", val_str
 
 def apply_desired_config_to_live(plugin_id: str):
     manifest = load_manifest(plugin_id)
     if not manifest: return
     meta = manifest.get("config_meta")
     if not meta: return
-
     desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
     if not os.path.exists(desired_path): return
 
@@ -107,7 +160,6 @@ def apply_desired_config_to_live(plugin_id: str):
 
     updated_keys = set()
     new_lines = []
-
     for line in lines:
         match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
         if match:
@@ -126,7 +178,6 @@ def apply_desired_config_to_live(plugin_id: str):
             new_lines.append(f"{key}={val}\n")
 
     with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
-
 
 class CompiledSafeScheduler(BackupScheduler):
     async def _check_and_run_backups(self):
@@ -188,7 +239,6 @@ class CompiledSafeScheduler(BackupScheduler):
                 with open(schedule_file, "w", encoding="utf-8") as f: json.dump(config, f, indent=2)
 
 scheduler = CompiledSafeScheduler(base_dir=EXE_DIR, backup_manager=backup_manager)
-
 game_update_cache = {}
 
 async def fetch_game_update_status(plugin_id: str):
@@ -219,7 +269,6 @@ async def fetch_game_update_status(plugin_id: str):
 
 async def game_update_checker_loop():
     await asyncio.sleep(10)
-    print("[*] SteamCMD Update-Radar gestartet.")
     while True:
         try:
             installed = get_installed_plugins()
@@ -232,9 +281,7 @@ async def prepare_steamcmd():
     os.makedirs(steam_dir, exist_ok=True)
     is_windows = platform.system() == "Windows"
     exe_path = os.path.join(steam_dir, "steamcmd.exe" if is_windows else "steamcmd.sh")
-
     if not os.path.exists(exe_path):
-        print("[*] Erster Start erkannt: Lade Core-Komponenten (SteamCMD) herunter...")
         url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" if is_windows else "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
         try:
             async with httpx.AsyncClient() as client:
@@ -244,9 +291,7 @@ async def prepare_steamcmd():
                         with zipfile.ZipFile(io.BytesIO(res.content)) as z: z.extractall(steam_dir)
                     else:
                         with tarfile.open(fileobj=io.BytesIO(res.content), mode="r:gz") as tar: tar.extractall(steam_dir)
-                    print("[+] SteamCMD erfolgreich initialisiert!")
-        except Exception as e:
-            print(f"[-] Fehler beim SteamCMD Setup: {e}")
+        except: pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -254,16 +299,30 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler.start_loop())
     asyncio.create_task(game_update_checker_loop())
 
+    def watchdog_spawner():
+        wd_running = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+        if not wd_running:
+            cmd = get_launch_command(mode="watchdog")
+            cmd.extend([str(ACTIVE_PORT), str(os.getpid())])
+            flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            subprocess.Popen(cmd, cwd=EXE_DIR, creationflags=flags)
+
+    watchdog_spawner()
+
     def open_browser():
-        print(f"[+] Öffne EmberCore Dashboard im Browser...")
-        webbrowser.open(f"http://127.0.0.1:{ACTIVE_PORT}")
+        flag_path = os.path.join(EXE_DIR, ".update_reboot")
+        if os.path.exists(flag_path):
+            try: os.remove(flag_path)
+            except: pass
+        elif "--service" not in sys.argv:
+            webbrowser.open(f"http://127.0.0.1:{ACTIVE_PORT}")
+
     threading.Timer(1.5, open_browser).start()
     yield
 
 app = FastAPI(title="EmberCore", version=system_info["version"], lifespan=lifespan)
 
 class InstallRequest(BaseModel): install_dir_name: Optional[str] = None
-
 disk_cache = {}
 
 def get_dir_size_mb(path):
@@ -283,9 +342,7 @@ def calculate_disk_trend(plugin_id: str):
 
     server_dir = os.path.join(SERVERS_ROOT, plugin_id)
     backup_dir = os.path.join(BACKUPS_ROOT, plugin_id)
-    server_mb = get_dir_size_mb(server_dir)
-    backup_mb = get_dir_size_mb(backup_dir)
-    total_mb = server_mb + backup_mb
+    total_mb = get_dir_size_mb(server_dir) + get_dir_size_mb(backup_dir)
 
     trend_file = os.path.join(DATA_ROOT, plugin_id, "storage_trend.json")
     os.makedirs(os.path.dirname(trend_file), exist_ok=True)
@@ -310,10 +367,7 @@ def calculate_disk_trend(plugin_id: str):
         if days_diff > 0: trend_mb_per_day = round((newest_mb - oldest_mb) / days_diff, 2)
 
     total_disk, used_disk, free_disk = shutil.disk_usage(EXE_DIR)
-    result = {
-        "server_mb": server_mb, "backup_mb": backup_mb, "total_plugin_mb": total_mb,
-        "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)
-    }
+    result = {"server_mb": get_dir_size_mb(server_dir), "backup_mb": get_dir_size_mb(backup_dir), "total_plugin_mb": total_mb, "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)}
     disk_cache[plugin_id] = (result, now)
     return result
 
@@ -327,6 +381,169 @@ def load_manifest(plugin_id: str):
     manifest_path, _, _ = get_plugin_paths(plugin_id)
     if not os.path.exists(manifest_path): return None
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
+
+
+# --- OS SERVICE & SYSTEM ROUTEN ---
+
+@app.get("/api/system/health")
+def system_health():
+    return {"status": "ok"}
+
+@app.get("/api/system/service/status")
+def system_service_status():
+    is_linux = platform.system() == "Linux"
+    installed = False
+    running = False
+
+    if is_linux:
+        installed = os.path.exists("/etc/systemd/system/embercore.service")
+        if installed:
+            try:
+                res = subprocess.run(["systemctl", "is-active", "embercore"], capture_output=True, text=True)
+                running = "active" in res.stdout
+            except: pass
+    else:
+        try:
+            out = subprocess.check_output(["schtasks", "/query", "/tn", "EmberCoreDaemon"], text=True, stderr=subprocess.DEVNULL)
+            installed = "EmberCoreDaemon" in out
+            if installed:
+                running = any("--service" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+        except: pass
+
+    wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+    proc = psutil.Process(os.getpid())
+
+    return {
+        "os": platform.system(),
+        "is_installed": installed,
+        "is_running": running,
+        "main_pid": os.getpid(),
+        "watchdog_active": wd_active,
+        "uptime_seconds": (datetime.now() - START_TIME).total_seconds(),
+        "ram_mb": round(proc.memory_info().rss / (1024*1024), 2),
+        "cpu_percent": psutil.cpu_percent()
+    }
+
+@app.post("/api/system/service/install")
+def install_system_service():
+    is_linux = platform.system() == "Linux"
+    exe_path = os.path.abspath(sys.executable if IS_COMPILED else sys.argv[0])
+
+    try:
+        if is_linux:
+            import pwd
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            cmd_args = f"{exe_path} --service" if IS_COMPILED else f"{sys.executable} {exe_path} --service"
+            service_content = f"""[Unit]\nDescription=EmberCore Game Server Panel\nAfter=network.target\n\n[Service]\nType=simple\nUser={current_user}\nWorkingDirectory={EXE_DIR}\nExecStart={cmd_args}\nRestart=always\nRestartSec=15\n\n[Install]\nWantedBy=multi-user.target\n"""
+
+            if os.geteuid() != 0:
+                script_path = os.path.join(EXE_DIR, "install_service.sh")
+                with open(script_path, "w") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write("cat << 'EOF' > /etc/systemd/system/embercore.service\n")
+                    f.write(service_content)
+                    f.write("EOF\n")
+                    f.write("systemctl daemon-reload\n")
+                    f.write("systemctl enable embercore.service\n")
+                    f.write("systemctl start embercore.service\n")
+                    f.write("echo 'EmberCore Service erfolgreich installiert und gestartet!'\n")
+                os.chmod(script_path, 0o755)
+                return {"status": "info", "message": "Fehlende Root-Rechte! Es wurde eine Datei 'install_service.sh' im Ordner erstellt. Bitte beende EmberCore und führe 'sudo bash ./install_service.sh' aus."}
+
+            with open("/etc/systemd/system/embercore.service", "w") as f: f.write(service_content)
+            subprocess.run(["systemctl", "daemon-reload"])
+            subprocess.run(["systemctl", "enable", "embercore.service"])
+            return {"status": "success", "message": "EmberCore wurde als systemd-Service installiert!"}
+        else:
+            import ctypes
+            tr_val = f'\\"{sys.executable}\\" \\"{exe_path}\\" --service' if not IS_COMPILED else f'\\"{exe_path}\\" --service'
+
+            if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+                bat_path = os.path.join(EXE_DIR, "install_service.bat")
+                with open(bat_path, "w") as f:
+                    f.write(f'@echo off\nschtasks /Create /TN "EmberCoreDaemon" /TR "{tr_val}" /SC ONSTART /RU SYSTEM /RL HIGHEST /F\n')
+                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                subprocess.run(["powershell", "-Command", ps_cmd])
+                return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service zu installieren!"}
+            else:
+                cmd_create = f'schtasks /Create /TN "EmberCoreDaemon" /TR "{tr_val}" /SC ONSTART /RU SYSTEM /RL HIGHEST /F'
+                subprocess.run(cmd_create, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return {"status": "success", "message": "EmberCore wurde erfolgreich als Windows Service installiert!"}
+    except Exception as e:
+        return {"status": "error", "message": f"Konnte Service nicht erstellen: {e}"}
+
+@app.post("/api/system/service/uninstall")
+def uninstall_system_service():
+    if platform.system() == "Linux":
+        if os.geteuid() != 0:
+            script_path = os.path.join(EXE_DIR, "uninstall_service.sh")
+            with open(script_path, "w") as f:
+                f.write("#!/bin/bash\nsystemctl stop embercore.service\nsystemctl disable embercore.service\nrm -f /etc/systemd/system/embercore.service\nsystemctl daemon-reload\necho 'Service erfolgreich entfernt!'\n")
+            os.chmod(script_path, 0o755)
+            return {"status": "info", "message": "Fehlende Root-Rechte! Es wurde eine Datei 'uninstall_service.sh' erstellt. Bitte mit 'sudo bash ./uninstall_service.sh' ausführen."}
+        try:
+            subprocess.run(["systemctl", "stop", "embercore.service"])
+            subprocess.run(["systemctl", "disable", "embercore.service"])
+            if os.path.exists("/etc/systemd/system/embercore.service"): os.remove("/etc/systemd/system/embercore.service")
+            subprocess.run(["systemctl", "daemon-reload"])
+            return {"status": "success", "message": "Service erfolgreich entfernt."}
+        except Exception as e: return {"status": "error", "message": str(e)}
+    else:
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+            bat_path = os.path.join(EXE_DIR, "uninstall_service.bat")
+            with open(bat_path, "w") as f:
+                f.write('@echo off\nschtasks /Delete /TN "EmberCoreDaemon" /F\n')
+            ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+            subprocess.run(["powershell", "-Command", ps_cmd])
+            return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service restlos zu entfernen!"}
+        else:
+            try:
+                subprocess.run('schtasks /Delete /TN "EmberCoreDaemon" /F', shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return {"status": "success", "message": "Windows Service erfolgreich entfernt."}
+            except Exception as e: return {"status": "error", "message": "Konnte Dienst nicht löschen."}
+
+@app.post("/api/system/service/start")
+def start_system_service():
+    try:
+        if platform.system() == "Linux":
+            if os.geteuid() != 0:
+                return {"status": "info", "message": "Bitte nutze 'sudo systemctl start embercore.service' in der Konsole, um den Dienst zu starten."}
+            subprocess.run(["systemctl", "start", "embercore.service"])
+        else:
+            import ctypes
+            if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+                bat_path = os.path.join(EXE_DIR, "start_service.bat")
+                with open(bat_path, "w") as f:
+                    f.write('@echo off\nschtasks /Run /TN "EmberCoreDaemon"\n')
+                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                subprocess.run(["powershell", "-Command", ps_cmd])
+            else: subprocess.run('schtasks /Run /TN "EmberCoreDaemon"', shell=True)
+        return {"status": "success", "message": "Service-Start wurde angefordert."}
+    except Exception as e: return {"status": "error", "message": str(e)}
+
+@app.post("/api/system/service/stop")
+def stop_system_service():
+    try:
+        if platform.system() == "Linux":
+            if os.geteuid() != 0:
+                return {"status": "info", "message": "Bitte nutze 'sudo systemctl stop embercore.service' in der Konsole, um den Dienst zu stoppen."}
+            subprocess.run(["systemctl", "stop", "embercore.service"])
+        else:
+            import ctypes
+            if ctypes.windll.shell32.IsUserAnAdmin() == 0:
+                bat_path = os.path.join(EXE_DIR, "stop_service.bat")
+                with open(bat_path, "w") as f:
+                    f.write(f'@echo off\ntaskkill /F /IM "{os.path.basename(sys.executable)}" /FI "USERNAME eq NT AUTHORITY\\SYSTEM"\n')
+                ps_cmd = f"Start-Process cmd.exe -ArgumentList '/c \"{bat_path}\"' -Verb RunAs -WindowStyle Hidden"
+                subprocess.run(["powershell", "-Command", ps_cmd])
+            else:
+                for p in psutil.process_iter(['cmdline']):
+                    cmd = p.info.get('cmdline')
+                    if cmd and '--service' in cmd: p.kill()
+        return {"status": "success", "message": "Service-Stopp wurde angefordert."}
+    except Exception as e: return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/system/version")
 def get_system_version():
@@ -345,7 +562,8 @@ async def check_system_update():
             async with httpx.AsyncClient() as client:
                 res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json", timeout=5.0)
                 if res.status_code == 200:
-                    remote_version = res.json().get("version", "")
+                    remote_data = res.json()
+                    remote_version = remote_data[0].get("version", "") if isinstance(remote_data, list) else remote_data.get("version", "")
                     local_version = get_current_system_version()["version"]
                     return {"update_available": remote_version != local_version}
         except: pass
@@ -353,11 +571,13 @@ async def check_system_update():
 
 @app.post("/api/system/update")
 async def update_embercore():
+    flag_path = os.path.join(EXE_DIR, ".update_reboot")
     if not IS_COMPILED:
         try:
             subprocess.run(["git", "fetch"], cwd=EXE_DIR, check=True)
             pull_result = subprocess.run(["git", "pull"], cwd=EXE_DIR, capture_output=True, text=True)
             if "Already up to date." in pull_result.stdout: return {"status": "info", "message": "Bereits aktuell."}
+            with open(flag_path, "w") as f: f.write("1")
             async def restart():
                 await asyncio.sleep(1.0)
                 os.execv(sys.executable, [sys.executable] + sys.argv)
@@ -365,42 +585,71 @@ async def update_embercore():
             return {"status": "success", "message": "Neustart läuft..."}
         except Exception as e: return {"status": "error", "message": str(e)}
     else:
-        remote_info = {}
+        remote_data = {}
+        target_version = ""
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json")
-                if res.status_code == 200: remote_info = res.json()
+                if res.status_code == 200:
+                    remote_data = res.json()
+                    target_version = remote_data[0].get("version", "") if isinstance(remote_data, list) else remote_data.get("version", "")
         except: pass
 
-        target_version = remote_info.get("version", "")
-        exe_url = f"https://github.com/MasterBurns/EmberCore/releases/download/{target_version}/EmberCore_Windows_{target_version}.zip" if target_version else "https://github.com/MasterBurns/EmberCore/releases/latest/download/EmberCore_Windows.zip"
-        new_zip_path = os.path.join(EXE_DIR, "EmberCore_update.zip")
+        # --- OS ERKENNUNG FÜR DEN DOWNLOAD ---
+        is_linux = platform.system() == "Linux"
+        os_name = "Linux" if is_linux else "Windows"
+        ext = "tar.gz" if is_linux else "zip"
+
+        file_name = f"EmberCore_{os_name}_{target_version}.{ext}" if target_version else f"EmberCore_{os_name}.{ext}"
+        exe_url = f"https://github.com/MasterBurns/EmberCore/releases/download/{target_version}/{file_name}" if target_version else f"https://github.com/MasterBurns/EmberCore/releases/latest/download/{file_name}"
+        archive_path = os.path.join(EXE_DIR, f"EmberCore_update.{ext}")
         current_exe_path = sys.executable
 
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(exe_url, timeout=60.0, follow_redirects=True)
                 if response.status_code == 200:
-                    with open(new_zip_path, "wb") as f: f.write(response.content)
-                else:
-                    return {"status": "error", "message": f"GitHub meldet Status {response.status_code} für das ZIP."}
+                    with open(archive_path, "wb") as f: f.write(response.content)
+                else: return {"status": "error", "message": f"GitHub meldet Status {response.status_code} für das Archiv."}
 
-            batch_path = os.path.join(EXE_DIR, "update_worker.bat")
-            with open(batch_path, "w", encoding="ascii") as f:
-                f.write("@echo off\n")
-                f.write("timeout /t 2 /nobreak > nul\n")
-                f.write(f"del /f /q \"{current_exe_path}\"\n")
-                f.write(f"powershell -command \"Expand-Archive -Force '{new_zip_path}' '{EXE_DIR}'\"\n")
-                f.write(f"del /f /q \"{new_zip_path}\"\n")
-                f.write(f"start \"\" \"{current_exe_path}\"\n")
-                f.write("del \"%~f0\"\n")
+            with open(flag_path, "w") as f: f.write("1")
 
-            subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            # --- OS SPEZIFISCHES ENTPACKEN ---
+            if is_linux:
+                script_path = os.path.join(EXE_DIR, "update_worker.sh")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write("#!/bin/bash\n")
+                    f.write("sleep 2\n") # Warte kurz, bis der Hauptprozess stirbt
+                    f.write(f"tar -xzf '{archive_path}' -C '{EXE_DIR}'\n")
+                    f.write(f"rm -f '{archive_path}'\n")
+                    if "--service" in sys.argv:
+                        f.write("systemctl restart embercore.service\n")
+                    else:
+                        f.write(f"nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
+                    f.write(f"rm -f '{script_path}'\n")
+                os.chmod(script_path, 0o755)
+                subprocess.Popen(["bash", script_path], cwd=EXE_DIR, start_new_session=True)
+            else:
+                batch_path = os.path.join(EXE_DIR, "update_worker.bat")
+                with open(batch_path, "w", encoding="ascii") as f:
+                    f.write("@echo off\n")
+                    f.write("timeout /t 2 /nobreak > nul\n")
+                    f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" /T > nul 2>&1\n")
+                    f.write("timeout /t 2 /nobreak > nul\n")
+                    f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\"\n")
+                    f.write(f"del /f /q \"{archive_path}\"\n")
+                    if "--service" in sys.argv:
+                        f.write("schtasks /Run /TN \"EmberCoreDaemon\"\n")
+                    else:
+                        f.write(f"start \"\" \"{current_exe_path}\" {' '.join(sys.argv[1:])}\n")
+                    f.write("del \"%~f0\"\n")
+                subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0)
+
             async def kill_switch():
                 await asyncio.sleep(1.0)
-                sys.exit(0)
+                os._exit(0)
             asyncio.create_task(kill_switch())
-            return {"status": "success", "message": "Binary erfolgreich heruntergeladen. Führe Update aus..."}
+            return {"status": "success", "message": "Update erfolgreich heruntergeladen. Führe Neustart aus..."}
         except Exception as e: return {"status": "error", "message": f"Kompiliertes Update fehlgeschlagen: {str(e)}"}
 
 @app.get("/api/plugins/installed")
@@ -674,12 +923,7 @@ def get_server_config(plugin_id: str):
         })
         merged_values[k] = normalized_val
 
-    return {
-        "enabled": True,
-        "fields": fields,
-        "unknown_fields": unknown_fields,
-        "values": merged_values
-    }
+    return {"enabled": True, "fields": fields, "unknown_fields": unknown_fields, "values": merged_values}
 
 @app.post("/api/server/config/{plugin_id}")
 def save_server_config(plugin_id: str, data: dict = Body(...)):
@@ -713,9 +957,7 @@ def save_server_config(plugin_id: str, data: dict = Body(...)):
         json.dump(current_desired, f, indent=2)
 
     live_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
-    if os.path.exists(live_path):
-        apply_desired_config_to_live(plugin_id)
-
+    if os.path.exists(live_path): apply_desired_config_to_live(plugin_id)
     return {"status": "success", "message": "Soll-Konfiguration gespeichert."}
 
 @app.get("/api/server/backup/schedule/{plugin_id}")

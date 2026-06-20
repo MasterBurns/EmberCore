@@ -1,20 +1,11 @@
 [
   {
-    "id": "hlds_test",
-    "name": "Half-Life Dedicated Server",
-    "category": "Shooter",
-    "version": "1.0.1",
-    "developer": "EmberCore Team",
-    "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/hlds_test.zip",
-    "description": "Klassischer GoldSrc-Server. Leichtgewichtig und optimal für Crossfire-Deathmatches."
-  },
-  {
     "id": "conan_exiles",
     "name": "Conan Exiles Dedicated Server",
     "category": "Survival",
     "version": "1.0.0",
     "developer": "MasterBurns",
     "zip_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/conan_exiles.zip",
-    "description": "Vollwertiger Survival-Server (AppID: 443030). Beinhaltet automatische Datenbank-Sicherung und Konfigurations-Management."
+    "description": "Conan Exiles Server"
   }
 ]

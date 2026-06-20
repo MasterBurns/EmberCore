@@ -1,21 +1,42 @@
-{
-  "version": "v0.1.2",
-  "build_date": "2026-06-20",
-  "changelog": [
-    "Windows intergration"
-  ]
-}
-{
-  "version": "v0.1.2.1",
-  "build_date": "2026-06-20",
-  "changelog": [
-    "QoL Features"
-  ]
-}
-{
-  "version": "v0.1.2.2",
-  "build_date": "2026-06-20",
-  "changelog": [
-    "UX Server Tab Redesign"
-  ]
-}
+[
+  {
+    "version": "v0.1.3",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "Install as Service
+         - Detect install error and provide sh script if not elevated
+         - Automatic uninstall
+         - Controlls for the Service
+       Introducing Watchdog and make it more robust in general
+
+       Edited / Added UX for Version and Service
+
+       Github Workflow for Automatic release Build Windows and Linux
+
+       Added Windows Support and fixed many Bugs
+
+       Added Portable Updater"
+    ]
+  },
+  {
+    "version": "v0.1.2.2",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "UX Server Tab Redesign"
+    ]
+  },
+  {
+    "version": "v0.1.2.1",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "QoL Features"
+    ]
+  },
+  {
+    "version": "v0.1.2",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "Windows intergration"
+    ]
+  }
+]
