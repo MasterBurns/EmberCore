@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.4.7",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Task -> Richtigen Service Status",
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
   "version": "v0.1.4.6",
   "build_date": "2026-06-20",
   "changelog": [
