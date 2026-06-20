@@ -426,23 +426,32 @@ def system_service_status():
                 running = "active" in res.stdout
             except: pass
     else:
+        # FIX: Kugelsicher! Wir nutzen eine unsichtbare Flag-Datei.
+        # Da Windows normalen Nutzern die SYSTEM-Tasks verheimlicht,
+        # verlassen wir uns auf den Marker, den unser Admin-Powershell Skript anlegt!
+        marker_path = os.path.join(EXE_DIR, ".service_installed")
+        installed = os.path.exists(marker_path)
+
         try:
-            # FIX: Kugelsichere Erkennung über nativen Windows-Befehl und Return-Code (0 = Task existiert)
-            flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-            res = subprocess.run(["schtasks", "/query", "/tn", "EmberCoreDaemon"], capture_output=True, creationflags=flags)
-            installed = (res.returncode == 0)
-
-            if installed:
-                running = any("--service" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+            running = any("--service" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
         except: pass
+        if running: installed = True
 
-    wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+    wd_active = False
+    try:
+        wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+    except: pass
 
-    # FIX: Nur die ECHTE CPU/RAM Auslastung von EmberCore auslesen!
-    proc = psutil.Process(os.getpid())
-    ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
-    # interval=0.05 misst kurz die Differenz für diesen spezifischen Prozess
-    ember_cpu = round(proc.cpu_percent(interval=0.05) / psutil.cpu_count(), 1)
+    try:
+        proc = psutil.Process(os.getpid())
+        ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
+        # FIX: Nur den exakten CPU-Verbrauch DIESES Prozesses messen und durch Kerne teilen!
+        proc.cpu_percent(interval=None)
+        time.sleep(0.05)
+        ember_cpu = round(proc.cpu_percent(interval=None) / psutil.cpu_count(), 1)
+    except:
+        ember_ram = 0.0
+        ember_cpu = 0.0
 
     return {
         "os": platform.system(),
@@ -488,6 +497,7 @@ def install_system_service():
         else:
             import ctypes
             ps_script = os.path.join(EXE_DIR, "install_service.ps1")
+            marker_path = os.path.join(EXE_DIR, ".service_installed")
             executable = os.path.abspath(exe_path if IS_COMPILED else sys.executable)
 
             if IS_COMPILED:
@@ -501,9 +511,10 @@ def install_system_service():
                 f.write("$principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n")
                 f.write("Register-ScheduledTask -TaskName 'EmberCoreDaemon' -Action $action -Trigger $trigger -Principal $principal -Force\n")
                 f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
+                # Marker-Datei schreiben, damit das Dashboard weiß, dass die Installation lief!
+                f.write(f"New-Item -Path '{marker_path}' -ItemType File -Force\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                # FIX: -NoExit rausgeworfen, -WindowStyle Hidden eingefügt
                 ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
                 return {"status": "info", "message": "Bitte bestätige jetzt das kleine Windows Administrator-Schild in der Taskleiste.\nEmberCore installiert sich dann selbst als Dienst und startet sofort!"}
@@ -532,13 +543,14 @@ def uninstall_system_service():
     else:
         import ctypes
         ps_script = os.path.join(EXE_DIR, "uninstall_service.ps1")
+        marker_path = os.path.join(EXE_DIR, ".service_installed")
         with open(ps_script, "w", encoding="utf-8") as f:
             f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
             f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
-            f.write(f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+            f.write(f"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+            f.write(f"Remove-Item -Path '{marker_path}' -Force -ErrorAction SilentlyContinue\n")
 
         if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-            # FIX: -NoExit rausgeworfen, -WindowStyle Hidden eingefügt
             ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
             subprocess.run(["powershell", "-Command", ps_cmd])
             return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service restlos zu entfernen!"}
@@ -562,7 +574,6 @@ def start_system_service():
                 f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                # FIX: -NoExit rausgeworfen, -WindowStyle Hidden eingefügt
                 ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
             else:
@@ -582,10 +593,9 @@ def stop_system_service():
             ps_script = os.path.join(EXE_DIR, "stop_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
                 f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
-                f.write(f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+                f.write(f"Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                # FIX: -NoExit rausgeworfen, -WindowStyle Hidden eingefügt
                 ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
             else:
@@ -822,16 +832,27 @@ def stats(plugin_id: str):
     # --- KUGELSICHERE RAM & CPU BERECHNUNG (Fängt Conan Exiles 8GB Child-Prozesse) ---
     if data.get("status") == "online":
         try:
-            server_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))
             target_procs = []
 
-            # Sucht ALLE laufenden Prozesse des Rechners, die im Ordner des Servers liegen!
-            for p in psutil.process_iter(['exe']):
+            # METHODE 1: Die echte Prozess-Hierarchie (Findet alle Child-Prozesse wie die 8GB Engine!)
+            if plugin_id in manager.processes:
                 try:
-                    exe = p.info.get('exe')
-                    if exe and os.path.abspath(exe).startswith(server_dir):
-                        target_procs.append(psutil.Process(p.pid))
-                except: pass
+                    parent_proc = psutil.Process(manager.processes[plugin_id].pid)
+                    target_procs = [parent_proc] + parent_proc.children(recursive=True)
+                except psutil.NoSuchProcess:
+                    pass
+
+            # METHODE 2: Fallback über Pfad (case-insensitive für Windows C:\ vs c:\)
+            if not target_procs:
+                server_dir_lower = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))).lower()
+                for p in psutil.process_iter(['exe']):
+                    try:
+                        exe = p.info.get('exe')
+                        if exe:
+                            exe_norm = os.path.normcase(os.path.abspath(exe)).lower()
+                            if exe_norm.startswith(server_dir_lower):
+                                target_procs.append(psutil.Process(p.pid))
+                    except: pass
 
             if target_procs:
                 total_ram = 0
@@ -841,12 +862,13 @@ def stats(plugin_id: str):
                         p.cpu_percent(interval=None) # Startpunkt für CPU-Messung
                     except: pass
 
-                time.sleep(0.05) # Kurzer Moment für die CPU-Delta-Berechnung
+                time.sleep(0.1) # Winzige Pause, damit Windows die CPU-Auslastung berechnen kann
 
                 total_cpu = 0.0
                 for p in target_procs:
                     try:
-                        total_cpu += p.cpu_percent(interval=None)
+                        # Durch die Prozessorkerne teilen = exakte Anzeige wie im Windows Taskmanager!
+                        total_cpu += (p.cpu_percent(interval=None) / psutil.cpu_count())
                     except: pass
 
                 data["ram_mb"] = round(total_ram / (1024 * 1024), 2)
