@@ -140,6 +140,57 @@ steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
 config_manager = ConfigManager()
 
+# =========================================================================
+# NEU: ADOPTION SYSTEM (Stateless Process Management)
+# =========================================================================
+class AdoptedProcess:
+    def __init__(self, pid):
+        self.pid = pid
+        self.ps = psutil.Process(pid)
+    def poll(self):
+        try:
+            if self.ps.is_running() and self.ps.status() != psutil.STATUS_ZOMBIE:
+                return None
+            return 0
+        except psutil.NoSuchProcess:
+            return 0
+    def wait(self, timeout=None):
+        try: self.ps.wait(timeout)
+        except: pass
+    def kill(self):
+        try:
+            for child in self.ps.children(recursive=True):
+                try: child.kill()
+                except: pass
+            self.ps.kill()
+        except: pass
+    def terminate(self):
+        self.kill()
+
+def is_server_online(plugin_id: str) -> bool:
+    if manager.is_running(plugin_id):
+        return True
+
+    server_dir = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))) + os.sep
+    for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name']):
+        try:
+            p_name = str(p.info.get('name') or '').lower()
+            if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe"]:
+                continue
+
+            exe = p.info.get('exe')
+            if exe and os.path.normcase(os.path.abspath(exe)).startswith(server_dir):
+                manager.processes[plugin_id] = AdoptedProcess(p.pid)
+                return True
+
+            cwd = p.info.get('cwd')
+            if cwd and (os.path.normcase(os.path.abspath(cwd)) + os.sep).startswith(server_dir):
+                manager.processes[plugin_id] = AdoptedProcess(p.pid)
+                return True
+        except: pass
+    return False
+# =========================================================================
+
 def parse_live_config_file(file_path: str) -> dict:
     values = {}
     if not os.path.exists(file_path): return values
@@ -427,7 +478,6 @@ def system_service_status():
             except: pass
     else:
         try:
-            # FIX: Echter Windows-Dienst Check! Das sc (Service Control) Kommando braucht keine Admin-Rechte zum Lesen.
             flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
             res = subprocess.run(["sc", "query", "EmberCore"], capture_output=True, text=True, creationflags=flags)
             if res.returncode == 0:
@@ -441,7 +491,6 @@ def system_service_status():
     except: pass
 
     try:
-        # FIX: CPU-Anzeige misst jetzt NUR noch EmberCore selbst und teilt durch die Prozessorkerne!
         proc = psutil.Process(os.getpid())
         ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
         proc.cpu_percent(interval=None)
@@ -493,14 +542,12 @@ def install_system_service():
             subprocess.run(["systemctl", "enable", "embercore.service"])
             return {"status": "success", "message": "EmberCore wurde als systemd-Service installiert!"}
         else:
-            # FIX: ECHTER Windows Service via offiziellem WinSW-Wrapper!
             winsw_url = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
             svc_exe = os.path.join(EXE_DIR, "EmberCoreService.exe")
             svc_xml = os.path.join(EXE_DIR, "EmberCoreService.xml")
 
             if not os.path.exists(svc_exe):
                 try:
-                    # Wirft den Python-Downloader statt PowerShell an, weil das immer durch Firewalls kommt!
                     req = urllib.request.Request(winsw_url, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=30) as response, open(svc_exe, 'wb') as out_file:
                         shutil.copyfileobj(response, out_file)
@@ -533,7 +580,6 @@ def install_system_service():
 
             ps_script = os.path.join(EXE_DIR, "install_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
-                # Alte kaputte Aufgabe vorsichtshalber löschen, falls vorhanden
                 f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
                 f.write(f"& '{svc_exe}' install\n")
                 f.write(f"& '{svc_exe}' start\n")
@@ -627,9 +673,8 @@ def stop_system_service():
             else:
                 subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
         return {"status": "success", "message": "Service-Stopp wurde angefordert."}
-    except Exception as e: return {"status": "error", "message": str(e)}S
+    except Exception as e: return {"status": "error", "message": str(e)}
 
-##########################################
 
 @app.get("/api/system/version")
 def get_system_version():
@@ -709,10 +754,12 @@ async def update_embercore():
                 with open(script_path, "w", encoding="utf-8") as f:
                     f.write("#!/bin/bash\n")
                     f.write("sleep 2\n")
+                    if "--service" in sys.argv:
+                        f.write("systemctl stop embercore.service\n")
                     f.write(f"tar -xzf '{archive_path}' -C '{EXE_DIR}'\n")
                     f.write(f"rm -f '{archive_path}'\n")
                     if "--service" in sys.argv:
-                        f.write("systemctl restart embercore.service\n")
+                        f.write("systemctl start embercore.service\n")
                     else:
                         f.write(f"nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
                     f.write(f"rm -f '{script_path}'\n")
@@ -723,12 +770,16 @@ async def update_embercore():
                 with open(batch_path, "w", encoding="ascii") as f:
                     f.write("@echo off\n")
                     f.write("timeout /t 2 /nobreak > nul\n")
-                    f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" /T > nul 2>&1\n")
+
+                    # WICHTIG: Erlaubt den Gameservern das UEBERLEBEN des Updates! Kein /T (TreeKill)
+                    f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
+
                     f.write("timeout /t 2 /nobreak > nul\n")
                     f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\"\n")
                     f.write(f"del /f /q \"{archive_path}\"\n")
+
                     if "--service" in sys.argv:
-                        f.write("schtasks /Run /TN \"EmberCoreDaemon\"\n")
+                        f.write(f"sc start EmberCore\n")
                     else:
                         f.write(f"start \"\" \"{current_exe_path}\" {' '.join(sys.argv[1:])}\n")
                     f.write("del \"%~f0\"\n")
@@ -771,7 +822,9 @@ def get_installed_plugins():
                         hostname_key = next((f["key"] for f in fields if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                         if hostname_key and live_values.get(hostname_key):
                             server_name = live_values.get(hostname_key)
-                    status = "online" if manager.is_running(plugin_id) else "offline"
+
+                    status = "online" if is_server_online(plugin_id) else "offline"
+
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
                     installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status})
                     seen_ids.add(plugin_id)
@@ -830,6 +883,9 @@ async def force_check_game_updates(plugin_id: str):
 
 @app.post("/api/server/start/{plugin_id}")
 def start(plugin_id: str):
+    if is_server_online(plugin_id):
+        return {"status": "error", "message": "Der Server läuft bereits im Hintergrund!"}
+
     manifest = load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
 
@@ -851,20 +907,30 @@ def start(plugin_id: str):
     return manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
 
 @app.post("/api/server/stop/{plugin_id}")
-def stop(plugin_id: str): return manager.stop_server(plugin_id)
+def stop(plugin_id: str):
+    is_server_online(plugin_id) # Zwingt das System, verwaiste Prozesse einzusammeln
+
+    if plugin_id in manager.processes:
+        try: manager.processes[plugin_id].terminate()
+        except: pass
+
+    try: manager.stop_server(plugin_id)
+    except: pass
+
+    return {"status": "success"}
 
 @app.get("/api/server/stats/{plugin_id}")
 def stats(plugin_id: str):
+    # Führt immer einen frischen Scan des Systems aus!
+    is_online = is_server_online(plugin_id)
     data = manager.get_stats(plugin_id)
 
-    # --- KUGELSICHERE RAM & CPU BERECHNUNG (Fängt alle abgekoppelten Game-Engines!) ---
-    if data.get("status") == "online":
+    if is_online:
+        data["status"] = "online"
         try:
             target_procs = {}
-            # Formatiert den Pfad so, dass Windows mit Slashes und Groß-/Kleinschreibung nicht durcheinanderkommt
             server_dir_clean = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))) + os.sep
 
-            # 1. Direkte Kinder der Popen-Instanz abfragen (Normaler Weg)
             if plugin_id in manager.processes:
                 try:
                     parent_proc = psutil.Process(manager.processes[plugin_id].pid)
@@ -874,14 +940,12 @@ def stats(plugin_id: str):
                 except psutil.NoSuchProcess:
                     pass
 
-            # 2. Systemweiter Scan (Fängt fiese Server ein, die sich wie Conan vom Launcher getrennt haben)
             for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name']):
                 try:
                     if p.info['pid'] in target_procs: continue
 
                     p_name = str(p.info.get('name') or '').lower()
-                    # Verhindert, dass wir aus Versehen cmd.exe oder EmberCore selbst zusammenzählen
-                    if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe"]:
+                    if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe"]:
                         continue
 
                     exe = p.info.get('exe')
@@ -905,17 +969,16 @@ def stats(plugin_id: str):
                 for p in target_procs.values():
                     try:
                         total_ram += p.memory_info().rss
-                        p.cpu_percent(interval=None) # Start für die CPU Messung
+                        p.cpu_percent(interval=None)
                         valid_procs.append(p)
                     except: pass
 
                 if valid_procs:
-                    time.sleep(0.1) # Kurze Pause, damit Windows die CPU Differenz messen kann
+                    time.sleep(0.1)
 
                     total_cpu = 0.0
                     for p in valid_procs:
                         try:
-                            # Durch die Anzahl der Kerne teilen = exakte Anzeige wie im Windows Taskmanager!
                             total_cpu += (p.cpu_percent(interval=None) / psutil.cpu_count())
                         except: pass
 
@@ -923,6 +986,10 @@ def stats(plugin_id: str):
                     data["cpu_percent"] = round(total_cpu, 1)
         except Exception:
             pass
+    else:
+        data["status"] = "offline"
+        data["ram_mb"] = 0
+        data["cpu_percent"] = 0
 
     data["disk"] = calculate_disk_trend(plugin_id)
     data["update_info"] = game_update_cache.get(plugin_id, {"available": False})
@@ -948,7 +1015,13 @@ def get_diagnostics(plugin_id: str):
 
 @app.post("/api/server/diagnostics/fix/{plugin_id}/{fix_type}")
 def apply_fix(plugin_id: str, fix_type: str):
-    if manager.is_running(plugin_id): manager.stop_server(plugin_id)
+    is_server_online(plugin_id) # Prozesse fangen
+    if plugin_id in manager.processes:
+        try: manager.processes[plugin_id].terminate()
+        except: pass
+    try: manager.stop_server(plugin_id)
+    except: pass
+
     manifest = load_manifest(plugin_id)
     if not manifest: return {"status": "error", "message": "Manifest nicht gefunden"}
 
@@ -1020,7 +1093,7 @@ def delete_server_mod(plugin_id: str, mod_id: str):
 
 @app.delete("/api/server/delete/{plugin_id}")
 def delete_server_files(plugin_id: str):
-    if manager.is_running(plugin_id): raise HTTPException(status_code=400, detail="Server läuft!")
+    if is_server_online(plugin_id): raise HTTPException(status_code=400, detail="Server läuft noch!")
     if os.path.exists(os.path.join(SERVERS_ROOT, plugin_id)): shutil.rmtree(os.path.join(SERVERS_ROOT, plugin_id))
     if os.path.exists(os.path.join(BACKUPS_ROOT, plugin_id)): shutil.rmtree(os.path.join(BACKUPS_ROOT, plugin_id))
     if os.path.exists(os.path.join(DATA_ROOT, plugin_id)): shutil.rmtree(os.path.join(DATA_ROOT, plugin_id))
@@ -1168,13 +1241,11 @@ def setup_network(plugin_id: str):
 
     ps_commands = ["Write-Host 'EmberCore konfiguriert Firewall & Router...'"]
 
-    # Firewall eintragen
     for p in ports:
         rule_name = f"EmberCore_{plugin_id}_{p['port']}_{p['protocol'].upper()}"
         ps_commands.append(f"netsh advfirewall firewall delete rule name='{rule_name}' 2> $null")
         ps_commands.append(f"netsh advfirewall firewall add rule name='{rule_name}' dir=in action=allow protocol={p['protocol']} localport={p['port']} 2> $null")
 
-    # UPnP Router Freigabe per Windows COM Objekt
     ps_commands.append("$upnp = New-Object -ComObject HNetCfg.NATUPnP")
     ps_commands.append("if ($upnp) { $map = $upnp.StaticPortMappingCollection; if ($map) {")
     for p in ports:

@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.5",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "NEU: Stateless um Recovery nach absturz zu ermöglichen"
+  ]
+  },
+  {
   "version": "v0.1.4.9",
   "build_date": "2026-06-20",
   "changelog": [
