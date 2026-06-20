@@ -1,14 +1,21 @@
 [
   {
+  "version": "v0.1.4.4",
+  "build_date": "2026-03-24",
+  "changelog": [
+    "FIX: Service -> Taskscheduler unter Windows"
+  ]
+  },
+  {
   "version": "v0.1.4.3",
-  "build_date": "2024-03-24",
+  "build_date": "2026-06-20",
   "changelog": [
     "FIX: Service unter Windows"
   ]
   },
   {
   "version": "v0.1.4.2",
-  "build_date": "2024-03-24",
+  "build_date": "2026-06-20",
   "changelog": [
     "FIX: UAC Meldung und Service Registration unter Windows",
     "FIX: Browser Meldung PopUps blockieren"
@@ -16,14 +23,14 @@
   },
   {
   "version": "v0.1.4.1",
-  "build_date": "2024-03-24",
+  "build_date": "2026-06-20",
   "changelog": [
     "FIX: Syntax error in Firewall integration"
   ]
   },
   {
   "version": "v0.1.4",
-  "build_date": "2024-03-24",
+  "build_date": "2026-06-20",
   "changelog": [
     "NEU: Firewall & Router UPnP Management",
     "NEU: Textlisten (Whitelist/Blacklist) Editor",
