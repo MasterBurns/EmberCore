@@ -1049,7 +1049,10 @@ def setup_network(plugin_id: str):
         rule_name = f"EmberCore_{plugin_id}_{p['port']}_{p['protocol'].upper()}"
         ps_commands.append(f"  try {{ $map.Remove({p['port']}, '{p['protocol'].upper()}') }} catch {{}}")
         ps_commands.append(f"  try {{ $map.Add({p['port']}, '{p['protocol'].upper()}', {p['port']}, '{local_ip}', $true, '{rule_name}') }} catch {{}}")
+
+    # HIER IST DER FIX: Das "s: ..." am Ende ist weg!
     ps_commands.append("} }")
+
     ps_commands.append("Write-Host 'Erfolgreich hinzugefuegt! Fenster schliesst sich in 3 Sekunden.'")
     ps_commands.append("Start-Sleep -Seconds 3")
 
