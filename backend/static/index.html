@@ -464,13 +464,41 @@
                 };
 
                 const subscribePlugin = async (plugin) => {
+                    // Abfrage des Servernamens
+                    const customName = prompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' ein:`, "Mein Server");
+
+                    // Abbruch durch den User oder leeres Feld
+                    if (!customName || customName.trim() === "") return;
+
+                    // Serverseitige Duplikats-Prüfung im Frontend vorab
+                    const exists = installedPlugins.value.find(p => p.server_name.toLowerCase() === customName.trim().toLowerCase());
+                    if (exists) {
+                        alert("Fehler: Ein Server mit diesem Namen existiert bereits! Bitte wähle einen anderen.");
+                        return;
+                    }
+
                     isSubscribing.value = plugin.id;
-                    const res = await fetch(`/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}`, { method: 'POST' });
-                    const data = await res.json();
-                    alert(data.message || data.detail);
-                    isSubscribing.value = null;
-                    await loadInstalledPlugins();
-                    if(data.status === "success") selectServer(plugin.id);
+
+                    // URL und Servernamen sauber kodieren
+                    const endpoint = `/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}&server_name=${encodeURIComponent(customName.trim())}`;
+
+                    try {
+                        const res = await fetch(endpoint, { method: 'POST' });
+                        const data = await res.json();
+
+                        alert(data.message || data.detail);
+                        isSubscribing.value = null;
+
+                        await loadInstalledPlugins();
+
+                        // Bei Erfolg direkt in den neuen Server springen
+                        if(data.status === "success" && data.instance_id) {
+                            selectServer(data.instance_id);
+                        }
+                    } catch (e) {
+                        alert("Verbindungsfehler beim Erstellen des Servers.");
+                        isSubscribing.value = null;
+                    }
                 };
 
                 const saveConfig = async () => {
