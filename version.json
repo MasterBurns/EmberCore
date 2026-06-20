@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.5.1",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Recovery nach absturz",
+    "FIX: UX Server erstellen Button ist nicht Fixiert"
+  ]
+  },
+  {
   "version": "v0.1.5",
   "build_date": "2026-06-20",
   "changelog": [

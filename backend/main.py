@@ -44,25 +44,13 @@ DEV_PLUGINS_ROOT = os.path.join(BASE_DIR, "dev_plugins") if not IS_COMPILED else
 ACTIVE_PORT = 8000
 START_TIME = datetime.now()
 
-# --- DAU-SCHUTZ (RECHTE-PRÜFUNG) ---
 def check_write_permissions():
     try:
         test_file = os.path.join(EXE_DIR, ".write_test")
         with open(test_file, "w") as f: f.write("test")
         os.remove(test_file)
     except PermissionError:
-        print("\n" + "!"*65)
-        print(" [SCHWERER FEHLER] FEHLENDE SCHREIBRECHTE!")
-        print("!"*65)
-        print(" EmberCore darf in diesem Ordner keine Dateien speichern.")
-        print(f" Aktueller Pfad: {EXE_DIR}")
-        print("\n LOESUNG:")
-        print(" Verschiebe den EmberCore-Ordner aus 'Programme' / 'Program Files'")
-        print(" heraus an einen freigegebenen Ort, z.B. nach:")
-        print(" -> C:\\EmberCore\\  oder  D:\\Games\\EmberCore\\")
-        print("\n (Bitte starte das Tool aus Sicherheitsgruenden NICHT als Admin!)")
-        print("!"*65 + "\n")
-        if platform.system() == "Windows": os.system("pause")
+        print("\n [SCHWERER FEHLER] FEHLENDE SCHREIBRECHTE!")
         sys.exit(1)
 
 check_write_permissions()
@@ -74,35 +62,26 @@ def get_launch_command(mode="normal"):
         if "--service" not in cmd: cmd.append("--service")
     return cmd
 
-# --- WATCHDOG INTERCEPT ---
 if "--watchdog" in sys.argv:
     try:
         port = int(sys.argv[sys.argv.index("--watchdog") + 1])
         parent_pid = int(sys.argv[sys.argv.index("--watchdog") + 2])
     except: sys.exit(1)
-
-    print(f"[Watchdog] 🛡️ Gestartet. Überwache PID {parent_pid} auf Port {port}...")
     time.sleep(15)
     fails = 0
-
     while True:
         if not psutil.pid_exists(parent_pid):
-            print("[Watchdog] ⚠️ Hauptprozess beendet. Warte 30s Grace Period...")
             time.sleep(30)
             if not psutil.pid_exists(parent_pid):
-                print("[Watchdog] Starte Hauptprozess neu...")
                 flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
                 subprocess.Popen(get_launch_command(), cwd=EXE_DIR, creationflags=flags)
             sys.exit(0)
-
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/api/system/health", timeout=5).read()
             fails = 0
         except Exception:
             fails += 1
-            print(f"[Watchdog] ⏳ Keine Antwort vom Hauptprozess ({fails}/4)")
             if fails >= 4:
-                print("[Watchdog] 🚨 Hauptprozess HÄNGT! Führe Kill & Restart durch...")
                 try: psutil.Process(parent_pid).kill()
                 except: pass
                 time.sleep(2)
@@ -130,8 +109,7 @@ def get_current_system_version():
                 elif isinstance(data, dict):
                     data["history"] = [data]
                     return data
-        except Exception as e:
-            print(f"[-] version.json Parser-Fehler: {e}")
+        except Exception as e: pass
     return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."], "history": []}
 
 system_info = get_current_system_version()
@@ -141,22 +119,35 @@ backup_manager = BackupManager(base_dir=EXE_DIR)
 config_manager = ConfigManager()
 
 # =========================================================================
-# NEU: ADOPTION SYSTEM (Stateless Process Management)
+# STATELESS PROCESS RECOVERY (Adoptiert verwaiste Prozesse automatisch)
 # =========================================================================
+class DummyStream:
+    def write(self, *args, **kwargs): pass
+    def flush(self, *args, **kwargs): pass
+    def close(self, *args, **kwargs): pass
+
 class AdoptedProcess:
     def __init__(self, pid):
         self.pid = pid
         self.ps = psutil.Process(pid)
+        # Dummy Streams verhindern Abstürze, wenn der Manager beim Beenden versucht
+        # Konsolenbefehle an den verwaisten Server zu senden!
+        self.stdin = DummyStream()
+        self.stdout = DummyStream()
+        self.stderr = DummyStream()
+
     def poll(self):
         try:
-            if self.ps.is_running() and self.ps.status() != psutil.STATUS_ZOMBIE:
+            if self.ps.is_running() and self.ps.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
                 return None
             return 0
         except psutil.NoSuchProcess:
             return 0
+
     def wait(self, timeout=None):
         try: self.ps.wait(timeout)
         except: pass
+
     def kill(self):
         try:
             for child in self.ps.children(recursive=True):
@@ -164,31 +155,81 @@ class AdoptedProcess:
                 except: pass
             self.ps.kill()
         except: pass
+
     def terminate(self):
         self.kill()
 
+def get_server_processes(plugin_id: str):
+    target_procs = {}
+    try:
+        base_path = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
+        server_dir_clean = base_path if base_path.endswith(os.sep) else base_path + os.sep
+
+        # 1. Existierende Prozesse aus dem Manager übernehmen
+        if plugin_id in manager.processes:
+            try:
+                parent_proc = psutil.Process(manager.processes[plugin_id].pid)
+                if parent_proc.is_running() and parent_proc.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
+                    target_procs[parent_proc.pid] = parent_proc
+                    for child in parent_proc.children(recursive=True):
+                        target_procs[child.pid] = child
+                else:
+                    del manager.processes[plugin_id]
+            except psutil.NoSuchProcess:
+                del manager.processes[plugin_id]
+
+        # 2. Globale Suche (Fängt Waisen-Prozesse ein, falls EmberCore abstürzt)
+        for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name', 'cmdline']):
+            try:
+                if p.info['pid'] in target_procs: continue
+
+                p_name = str(p.info.get('name') or '').lower()
+                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe"]:
+                    continue
+
+                matched = False
+
+                exe = p.info.get('exe')
+                if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean):
+                    matched = True
+
+                if not matched:
+                    cwd = p.info.get('cwd')
+                    if cwd:
+                        cwd_path = os.path.normcase(os.path.realpath(cwd))
+                        cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
+                        if cwd_path.startswith(server_dir_clean):
+                            matched = True
+
+                if not matched:
+                    cmdline = p.info.get('cmdline')
+                    if cmdline:
+                        cmd_str = " ".join(cmdline).lower()
+                        # Fuzzy Match im CMD String
+                        if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str:
+                            matched = True
+
+                if matched:
+                    proc = psutil.Process(p.info['pid'])
+                    target_procs[proc.pid] = proc
+                    for child in proc.children(recursive=True):
+                        try: target_procs[child.pid] = child
+                        except: pass
+            except: pass
+    except: pass
+    return target_procs
+
 def is_server_online(plugin_id: str) -> bool:
-    if manager.is_running(plugin_id):
+    procs = get_server_processes(plugin_id)
+    if procs:
+        if plugin_id not in manager.processes:
+            main_pid = min(procs.keys())
+            manager.processes[plugin_id] = AdoptedProcess(main_pid)
         return True
-
-    server_dir = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))) + os.sep
-    for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name']):
-        try:
-            p_name = str(p.info.get('name') or '').lower()
-            if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe"]:
-                continue
-
-            exe = p.info.get('exe')
-            if exe and os.path.normcase(os.path.abspath(exe)).startswith(server_dir):
-                manager.processes[plugin_id] = AdoptedProcess(p.pid)
-                return True
-
-            cwd = p.info.get('cwd')
-            if cwd and (os.path.normcase(os.path.abspath(cwd)) + os.sep).startswith(server_dir):
-                manager.processes[plugin_id] = AdoptedProcess(p.pid)
-                return True
-        except: pass
-    return False
+    else:
+        if plugin_id in manager.processes:
+            del manager.processes[plugin_id]
+        return False
 # =========================================================================
 
 def parse_live_config_file(file_path: str) -> dict:
@@ -455,9 +496,6 @@ def load_manifest(plugin_id: str):
     manifest_path, _, _ = get_plugin_paths(plugin_id)
     if not os.path.exists(manifest_path): return None
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
-
-
-# --- OS SERVICE & SYSTEM ROUTEN ---
 
 @app.get("/api/system/health")
 def system_health():
@@ -770,14 +808,10 @@ async def update_embercore():
                 with open(batch_path, "w", encoding="ascii") as f:
                     f.write("@echo off\n")
                     f.write("timeout /t 2 /nobreak > nul\n")
-
-                    # WICHTIG: Erlaubt den Gameservern das UEBERLEBEN des Updates! Kein /T (TreeKill)
                     f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
-
                     f.write("timeout /t 2 /nobreak > nul\n")
                     f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\"\n")
                     f.write(f"del /f /q \"{archive_path}\"\n")
-
                     if "--service" in sys.argv:
                         f.write(f"sc start EmberCore\n")
                     else:
@@ -791,7 +825,7 @@ async def update_embercore():
             asyncio.create_task(kill_switch())
             return {"status": "success", "message": "Update erfolgreich heruntergeladen. Führe Neustart aus..."}
         except Exception as e:
-            return {"status": "error", "message": f"Update Prozess gecrasht: {str(e)}"}
+            return {"status": "error", "message": str(e)}
 
 @app.get("/api/plugins/installed")
 def get_installed_plugins():
@@ -908,11 +942,20 @@ def start(plugin_id: str):
 
 @app.post("/api/server/stop/{plugin_id}")
 def stop(plugin_id: str):
-    is_server_online(plugin_id) # Zwingt das System, verwaiste Prozesse einzusammeln
+    # Gnadenloser System-Kill für verwaiste Prozesse!
+    procs = get_server_processes(plugin_id)
+    for p in procs.values():
+        try:
+            for child in p.children(recursive=True):
+                try: child.kill()
+                except: pass
+            p.kill()
+        except: pass
 
     if plugin_id in manager.processes:
         try: manager.processes[plugin_id].terminate()
         except: pass
+        del manager.processes[plugin_id]
 
     try: manager.stop_server(plugin_id)
     except: pass
@@ -921,48 +964,13 @@ def stop(plugin_id: str):
 
 @app.get("/api/server/stats/{plugin_id}")
 def stats(plugin_id: str):
-    # Führt immer einen frischen Scan des Systems aus!
     is_online = is_server_online(plugin_id)
     data = manager.get_stats(plugin_id)
 
     if is_online:
         data["status"] = "online"
         try:
-            target_procs = {}
-            server_dir_clean = os.path.normcase(os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))) + os.sep
-
-            if plugin_id in manager.processes:
-                try:
-                    parent_proc = psutil.Process(manager.processes[plugin_id].pid)
-                    target_procs[parent_proc.pid] = parent_proc
-                    for child in parent_proc.children(recursive=True):
-                        target_procs[child.pid] = child
-                except psutil.NoSuchProcess:
-                    pass
-
-            for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name']):
-                try:
-                    if p.info['pid'] in target_procs: continue
-
-                    p_name = str(p.info.get('name') or '').lower()
-                    if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe"]:
-                        continue
-
-                    exe = p.info.get('exe')
-                    if exe:
-                        exe_clean = os.path.normcase(os.path.abspath(exe))
-                        if exe_clean.startswith(server_dir_clean):
-                            target_procs[p.info['pid']] = p
-                            continue
-
-                    cwd = p.info.get('cwd')
-                    if cwd:
-                        cwd_clean = os.path.normcase(os.path.abspath(cwd)) + os.sep
-                        if cwd_clean.startswith(server_dir_clean):
-                            target_procs[p.info['pid']] = p
-                            continue
-                except: pass
-
+            target_procs = get_server_processes(plugin_id)
             if target_procs:
                 total_ram = 0
                 valid_procs = []
@@ -1015,12 +1023,7 @@ def get_diagnostics(plugin_id: str):
 
 @app.post("/api/server/diagnostics/fix/{plugin_id}/{fix_type}")
 def apply_fix(plugin_id: str, fix_type: str):
-    is_server_online(plugin_id) # Prozesse fangen
-    if plugin_id in manager.processes:
-        try: manager.processes[plugin_id].terminate()
-        except: pass
-    try: manager.stop_server(plugin_id)
-    except: pass
+    if is_server_online(plugin_id): stop(plugin_id)
 
     manifest = load_manifest(plugin_id)
     if not manifest: return {"status": "error", "message": "Manifest nicht gefunden"}
