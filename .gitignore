@@ -2,6 +2,10 @@
 .venv/
 __pycache__/
 *.pyc
+dist/
+build/
+data/
+servers/
 
 # Flüchtige EmberCore Runtime-Daten (NIEMALS im Git)
 backend/servers/
@@ -11,3 +15,5 @@ backend/data/
 
 # Dein Entwicklungs-Ordner (WIRD im Git getrackt)
 !backend/dev_plugins/
+
+EmberCore.spec
