@@ -71,7 +71,7 @@
                                 <p class="text-xs text-gray-400 leading-relaxed">{{ plugin.description }}</p>
                             </div>
                             <div class="mt-6 border-t border-gray-900 pt-4">
-                                <button @click="subscribePlugin(plugin)" :disabled="isSubscribing === plugin.id" class="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-gray-900 disabled:text-gray-500 text-white font-medium p-2 rounded-lg transition cursor-pointer text-sm">
+                                <button @click="subscribePlugin(plugin)" :disabled="isSubscribing === plugin.id" class="w-full bg-orange-600 hover:bg-orange-500 disabled:bg-gray-900 text-white font-medium p-2 rounded-lg transition cursor-pointer text-sm">
                                     {{ isSubscribing === plugin.id ? '⏳ Herunterladen...' : '➕ Server erstellen' }}
                                 </button>
                             </div>
@@ -92,6 +92,7 @@
                                 <button @click="serverTab = 'status'" :class="serverTab === 'status' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:bg-gray-800'" class="h-8 px-3 rounded-md font-medium transition cursor-pointer text-xs flex items-center justify-center">🖥️ Status</button>
                                 <button @click="openConsoleTab" :class="serverTab === 'console' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:bg-gray-800'" class="h-8 px-3 rounded-md font-medium transition cursor-pointer text-xs flex items-center justify-center">📟 Konsole</button>
                                 <button @click="openConfigTab" :class="serverTab === 'config' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:bg-gray-800'" class="h-8 px-3 rounded-md font-medium transition cursor-pointer text-xs flex items-center justify-center">⚙️ Einstellungen</button>
+                                <button @click="openModsTab" :class="serverTab === 'mods' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:bg-gray-800'" class="h-8 px-3 rounded-md font-medium transition cursor-pointer text-xs flex items-center justify-center">🔌 Mods</button>
                                 <button @click="openBackupTab" :class="serverTab === 'backups' ? 'bg-orange-600 text-white shadow' : 'text-gray-400 hover:bg-gray-800'" class="h-8 px-3 rounded-md font-medium transition cursor-pointer text-xs flex items-center justify-center">💾 Backups</button>
                             </nav>
                         </div>
@@ -114,6 +115,18 @@
                             <p>{{ loadingMessage }}</p>
                         </div>
 
+                        <div v-if="activeDiagnostics.length > 0" class="bg-red-950/80 border border-red-800 rounded-xl p-5 shadow-lg space-y-3">
+                            <h3 class="text-red-400 font-bold uppercase tracking-wider text-xs flex items-center gap-2">
+                                ⚠️ Absturz-Schutz: Systemstörung im Log erkannt
+                            </h3>
+                            <div v-for="diag in activeDiagnostics" :key="diag.id" class="bg-black/30 p-3 rounded-lg flex justify-between items-center border border-red-900/40">
+                                <p class="text-xs text-red-200">{{ diag.message }}</p>
+                                <button @click="applyFix(diag.fix_type)" class="bg-red-700 hover:bg-red-600 text-white text-[11px] font-bold px-3 py-1.5 rounded transition cursor-pointer whitespace-nowrap ml-4">
+                                    {{ diag.fix_label }}
+                                </button>
+                            </div>
+                        </div>
+
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-inner flex flex-col justify-between">
                                 <p class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-4 border-b border-gray-900 pb-2">Ressourcen-Nutzung</p>
@@ -128,7 +141,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <div class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-inner flex flex-col justify-between">
                                 <div class="flex justify-between items-center border-b border-gray-900 pb-2 mb-4">
                                     <p class="text-xs text-gray-500 font-bold uppercase tracking-wider">Laufwerks-Analyse</p>
@@ -170,18 +182,64 @@
 
                     <div v-if="serverTab === 'config'" class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                         <div v-if="configData.enabled" class="space-y-4">
-                            <div v-for="field in configData.fields" :key="field.key" class="flex flex-col space-y-1">
+                            <div v-for="field in configData.fields" :key="field.key" class="flex flex-col space-y-2 border-b border-gray-900/50 pb-3">
                                 <label class="text-xs font-bold text-gray-400 uppercase tracking-wide">{{ field.label }}</label>
-                                <input v-if="field.type === 'text'" type="text" v-model="configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none">
-                                <input v-if="field.type === 'number'" type="number" v-model.number="configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none">
+
+                                <div v-if="field.type === 'boolean'" class="flex items-center pt-1">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" v-model="configData.values[field.key]" class="sr-only peer">
+                                        <div class="w-11 h-6 bg-gray-900 border border-gray-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                                    </label>
+                                    <span class="text-xs text-gray-500 ml-3 font-mono font-bold">{{ configData.values[field.key] ? 'AKTIVIERT' : 'DEAKTIVIERT' }}</span>
+                                </div>
+
+                                <input v-if="field.type === 'text'" type="text" v-model="configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
+                                <input v-if="field.type === 'number'" type="number" v-model.number="configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
                             </div>
                             <button @click="saveConfig" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium p-2.5 rounded-lg transition shadow-md mt-4 cursor-pointer text-sm">💾 Einstellungen speichern</button>
                         </div>
-                        <p v-else class="text-gray-500 text-sm text-center py-6">Dieses Profil besitzt keine editierbaren Web-Konfigurationen.</p>
+                    </div>
+
+                    <div v-if="serverTab === 'mods'" class="space-y-6">
+                        <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
+                            <div>
+                                <h3 class="text-sm font-bold text-white uppercase tracking-wider">🔌 Steam Workshop Modifikationen</h3>
+                                <p class="text-xs text-gray-500">Füge eine Workshop-ID ein, um Mods vollautomatisch über die Steam-API einzubinden.</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" placeholder="z.B. 880454836" v-model="newModId" class="bg-gray-900 border border-gray-800 text-sm text-white p-2 rounded-lg outline-none focus:border-orange-500 font-mono w-48">
+                                <button @click="addMod" class="bg-orange-600 hover:bg-orange-500 text-xs font-semibold px-4 py-2.5 rounded-lg text-white transition cursor-pointer">➕ Mod hinzufügen</button>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-950 rounded-xl border border-gray-900 overflow-hidden shadow-md">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-900/40 border-b border-gray-900 text-gray-500 text-[10px] uppercase font-bold">
+                                        <th class="p-3">Workshop ID</th>
+                                        <th class="p-3">Mod-Name</th>
+                                        <th class="p-3">Letztes Update</th>
+                                        <th class="p-3 text-right">Aktionen</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-900 text-xs text-gray-300">
+                                    <tr v-for="mod in activeMods" :key="mod.id" class="hover:bg-gray-900/20">
+                                        <td class="p-3 font-mono text-gray-500">{{ mod.id }}</td>
+                                        <td class="p-3 font-bold text-white">{{ mod.name }}</td>
+                                        <td class="p-3 text-blue-400 font-mono">{{ mod.version }}</td>
+                                        <td class="p-3 text-right">
+                                            <button @click="deleteMod(mod.id)" class="text-red-500 hover:text-red-400 transition cursor-pointer px-2">🗑️ Löschen</button>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="activeMods.length === 0">
+                                        <td colspan="4" class="p-6 text-center text-gray-600">Keine Modifikationen für diesen Server aktiv.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
 
                     <div v-if="serverTab === 'backups'" class="space-y-6">
-
                         <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                             <div class="flex justify-between items-center border-b border-gray-900 pb-3">
                                 <div>
@@ -190,39 +248,30 @@
                                 </div>
                                 <button @click="saveBackupSettings" class="bg-gray-900 hover:bg-gray-800 border border-gray-800 text-xs font-semibold px-4 py-2 rounded-lg text-gray-300 transition cursor-pointer">Speichern</button>
                             </div>
-
                             <div class="space-y-3 pt-2">
                                 <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                    <div>
-                                        <p class="text-sm font-bold text-white">Letzte Backups immer behalten</p>
-                                    </div>
+                                    <div><p class="text-sm font-bold text-white">Letzte Backups immer behalten</p></div>
                                     <div class="flex items-center space-x-2">
                                         <input type="number" v-model.number="backupSchedule.retention.keep_latest" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
                                         <span class="text-xs text-gray-400 w-12">Stück</span>
                                     </div>
                                 </div>
                                 <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                    <div>
-                                        <p class="text-sm font-bold text-white">Tägliche Backups aufheben</p>
-                                    </div>
+                                    <div><p class="text-sm font-bold text-white">Tägliche Backups aufheben</p></div>
                                     <div class="flex items-center space-x-2">
                                         <input type="number" v-model.number="backupSchedule.retention.keep_daily" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
                                         <span class="text-xs text-gray-400 w-12">Tage</span>
                                     </div>
                                 </div>
                                 <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                    <div>
-                                        <p class="text-sm font-bold text-white">Wöchentliche Backups aufheben</p>
-                                    </div>
+                                    <div><p class="text-sm font-bold text-white">Wöchentliche Backups aufheben</p></div>
                                     <div class="flex items-center space-x-2">
                                         <input type="number" v-model.number="backupSchedule.retention.keep_weekly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
                                         <span class="text-xs text-gray-400 w-12">Wochen</span>
                                     </div>
                                 </div>
                                 <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
-                                    <div>
-                                        <p class="text-sm font-bold text-white">Monatliche Backups aufheben</p>
-                                    </div>
+                                    <div><p class="text-sm font-bold text-white">Monatliche Backups aufheben</p></div>
                                     <div class="flex items-center space-x-2">
                                         <input type="number" v-model.number="backupSchedule.retention.keep_monthly" class="w-16 bg-gray-950 border border-gray-700 rounded p-1.5 text-sm text-white text-center font-mono">
                                         <span class="text-xs text-gray-400 w-12">Monate</span>
@@ -234,17 +283,12 @@
                         <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                             <div>
                                 <h3 class="text-sm font-bold text-white uppercase tracking-wider">⏱️ Automatisierungs-Pläne</h3>
-                                <p class="text-xs text-gray-500">Definiere beliebig viele Intervalle oder feste Uhrzeiten für automatische Backups</p>
                             </div>
                             <div class="space-y-2">
                                 <div v-for="(sched, index) in backupSchedule.schedules" :key="index" class="flex justify-between items-center bg-gray-900 border border-gray-800 p-2 rounded-lg">
-                                    <span class="text-sm text-gray-300">
-                                        {{ sched.type === 'interval' ? 'Alle ' + sched.value + ' Stunden' : 'Täglich um ' + sched.value + ' Uhr' }}
-                                    </span>
+                                    <span class="text-sm text-gray-300">{{ sched.type === 'interval' ? 'Alle ' + sched.value + ' Stunden' : 'Täglich um ' + sched.value + ' Uhr' }}</span>
                                     <button @click="removeSchedule(index)" class="text-red-500 hover:text-red-400 text-xs px-2 cursor-pointer">✖ Entfernen</button>
                                 </div>
-                                <p v-if="backupSchedule.schedules.length === 0" class="text-xs text-gray-600 pb-2">Keine Zeitpläne aktiv.</p>
-
                                 <div class="flex items-center space-x-2 border-t border-gray-900 pt-3">
                                     <select v-model="newSchedType" class="bg-gray-900 border border-gray-800 text-xs text-white p-2 rounded outline-none w-32">
                                         <option value="daily">Feste Uhrzeit</option>
@@ -266,21 +310,16 @@
                                 <thead>
                                     <tr class="bg-gray-900/40 border-b border-gray-900 text-gray-500 text-[10px] uppercase font-bold">
                                         <th class="p-3">Dateiname</th>
-                                        <th class="p-3">Größe</th>
                                         <th class="p-3 text-right">Aktionen</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-900 text-xs text-gray-300">
                                     <tr v-for="bak in backupList" :key="bak.filename" class="hover:bg-gray-900/20">
                                         <td class="p-3 font-mono text-orange-400/80">{{ bak.filename }}</td>
-                                        <td class="p-3 text-blue-400 font-semibold">{{ bak.size_mb }} MB</td>
                                         <td class="p-3 text-right space-x-1">
                                             <button @click="restoreBackup(bak.filename)" class="bg-gray-900 hover:bg-green-950 border border-gray-800 text-gray-400 hover:text-green-400 px-2 py-1 rounded transition cursor-pointer">↩️ Einspielen</button>
                                             <button @click="deleteBackup(bak.filename)" class="bg-gray-900 hover:bg-red-950 border border-gray-800 text-gray-400 hover:text-red-400 px-2 py-1 rounded transition cursor-pointer">🗑️ Löschen</button>
                                         </td>
-                                    </tr>
-                                    <tr v-if="backupList.length === 0">
-                                        <td colspan="3" class="p-6 text-center text-gray-600">Noch keine Backups vorhanden.</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -297,7 +336,7 @@
 
         createApp({
             setup() {
-                const currentView = ref("server"); // "server" oder "marketplace"
+                const currentView = ref("server");
                 const serverTab = ref("status");
                 const selectedPlugin = ref("hlds_test");
 
@@ -311,6 +350,9 @@
                 const backupList = ref([]);
                 const configData = ref({ enabled: false, fields: [], values: {} });
                 const consoleLogs = ref([]);
+                const activeDiagnostics = ref([]);
+                const activeMods = ref([]);
+                const newModId = ref("");
 
                 const backupSchedule = ref({ schedules: [], retention: {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3} });
                 const newSchedType = ref("daily");
@@ -335,7 +377,6 @@
                     const res = await fetch('/api/plugins/installed');
                     if (res.ok) {
                         installedPlugins.value = await res.json();
-                        // Wenn der Server gelöscht wurde und nicht mehr in der Liste ist -> ab zum Marketplace
                         if (selectedPlugin.value && !installedPlugins.value.find(p => p.id === selectedPlugin.value)) {
                             openMarketplace();
                         }
@@ -349,6 +390,12 @@
                         if (res.ok) {
                             serverStats.value = await res.json();
                             loadInstalledPlugins();
+                        }
+                        if (serverStats.value.status === 'online') {
+                            const diagRes = await fetch(`/api/server/diagnostics/${selectedPlugin.value}`);
+                            if (diagRes.ok) activeDiagnostics.value = await diagRes.json();
+                        } else {
+                            activeDiagnostics.value = [];
                         }
                         if (serverTab.value === 'console' && serverStats.value.status === 'online') {
                             const logRes = await fetch(`/api/server/logs/${selectedPlugin.value}`);
@@ -381,7 +428,48 @@
                 const openConfigTab = async () => {
                     serverTab.value = 'config';
                     const res = await fetch(`/api/server/config/${selectedPlugin.value}`);
-                    if (res.ok) configData.value = await res.json();
+                    if (res.ok) {
+                        const data = await res.json();
+
+                        // Normalisiere Werte für die JS-Weiche ("True"/1 zu echtem true)
+                        if (data.enabled && data.values) {
+                            data.fields.forEach(f => {
+                                if (f.type === 'boolean') {
+                                    const val = data.values[f.key];
+                                    data.values[f.key] = (val === 1 || val === "1" || String(val).toLowerCase() === "true");
+                                }
+                            });
+                        }
+                        configData.value = data;
+                    }
+                };
+
+                const openModsTab = async () => {
+                    serverTab.value = 'mods';
+                    fetchMods();
+                };
+
+                const fetchMods = async () => {
+                    const res = await fetch(`/api/server/mods/${selectedPlugin.value}`);
+                    if (res.ok) activeMods.value = await res.json();
+                };
+
+                const addMod = async () => {
+                    if (!newModId.value.trim()) return;
+                    isActionLoading.value = true;
+                    loadingMessage.value = "Koppele mit Steam Workshop API...";
+                    const res = await fetch(`/api/server/mods/add/${selectedPlugin.value}/${newModId.value.trim()}`, { method: 'POST' });
+                    const data = await res.json();
+                    if(data.status === "error") alert(data.message);
+                    newModId.value = "";
+                    isActionLoading.value = false;
+                    fetchMods();
+                };
+
+                const deleteMod = async (modId) => {
+                    if (!confirm("Modifikation aus dem Server-Ladezyklus entfernen?")) return;
+                    await fetch(`/api/server/mods/delete/${selectedPlugin.value}/${modId}`, { method: 'DELETE' });
+                    fetchMods();
                 };
 
                 const openBackupTab = () => {
@@ -405,100 +493,22 @@
                     }
                 };
 
-                const addSchedule = () => {
-                    if(!newSchedVal.value) return;
-                    backupSchedule.value.schedules.push({ type: newSchedType.value, value: newSchedVal.value });
-                    saveBackupSettings();
-                    newSchedVal.value = "";
-                };
-
-                const removeSchedule = (idx) => {
-                    backupSchedule.value.schedules.splice(idx, 1);
-                    saveBackupSettings();
-                };
-
-                const saveBackupSettings = async () => {
-                    await fetch(`/api/server/backup/schedule/${selectedPlugin.value}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(backupSchedule.value)
-                    });
-                };
-
-                const createBackup = async () => {
-                    await fetch(`/api/server/backup/create/${selectedPlugin.value}`, { method: 'POST' });
-                    fetchBackups();
-                };
-
-                const restoreBackup = async (filename) => {
-                    if (!confirm(`Backup '${filename}' wirklich einspielen?`)) return;
-                    await fetch(`/api/server/backup/restore/${selectedPlugin.value}/${filename}`, { method: 'POST' });
-                };
-
-                const deleteBackup = async (filename) => {
-                    if (!confirm(`Dieses Backup dauerhaft löschen?`)) return;
-                    await fetch(`/api/server/backup/delete/${selectedPlugin.value}/${filename}`, { method: 'DELETE' });
-                    fetchBackups();
-                };
-
-                const startServer = async () => {
-                    isActionLoading.value = true;
-                    await fetch(`/api/server/start/${selectedPlugin.value}`, { method: 'POST' });
-                    isActionLoading.value = false;
-                    setTimeout(fetchStats, 1000);
-                };
-
-                const stopServer = async () => {
-                    isActionLoading.value = true;
-                    await fetch(`/api/server/stop/${selectedPlugin.value}`, { method: 'POST' });
-                    isActionLoading.value = false;
-                    setTimeout(fetchStats, 500);
-                };
-
-                const openLocalFolder = () => fetch(`/api/server/open-folder/${selectedPlugin.value}`, { method: 'POST' });
-
-                const openMarketplace = () => {
-                    currentView.value = "marketplace";
-                    selectedPlugin.value = null; // Markierung in der Seitenleiste aufheben
-                    fetch('/api/plugins/available').then(r => r.json()).then(d => availablePlugins.value = d).catch(() => {});
-                };
-
                 const subscribePlugin = async (plugin) => {
-                    // Abfrage des Servernamens
                     const customName = prompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' ein:`, "Mein Server");
-
-                    // Abbruch durch den User oder leeres Feld
                     if (!customName || customName.trim() === "") return;
-
-                    // Serverseitige Duplikats-Prüfung im Frontend vorab
                     const exists = installedPlugins.value.find(p => p.server_name.toLowerCase() === customName.trim().toLowerCase());
-                    if (exists) {
-                        alert("Fehler: Ein Server mit diesem Namen existiert bereits! Bitte wähle einen anderen.");
-                        return;
-                    }
+                    if (exists) { alert("Servername existiert bereits!"); return; }
 
                     isSubscribing.value = plugin.id;
-
-                    // URL und Servernamen sauber kodieren
                     const endpoint = `/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}&server_name=${encodeURIComponent(customName.trim())}`;
-
                     try {
                         const res = await fetch(endpoint, { method: 'POST' });
                         const data = await res.json();
-
                         alert(data.message || data.detail);
                         isSubscribing.value = null;
-
                         await loadInstalledPlugins();
-
-                        // Bei Erfolg direkt in den neuen Server springen
-                        if(data.status === "success" && data.instance_id) {
-                            selectServer(data.instance_id);
-                        }
-                    } catch (e) {
-                        alert("Verbindungsfehler beim Erstellen des Servers.");
-                        isSubscribing.value = null;
-                    }
+                        if(data.status === "success" && data.instance_id) selectServer(data.instance_id);
+                    } catch (e) { alert("Verbindungsfehler."); isSubscribing.value = null; }
                 };
 
                 const saveConfig = async () => {
@@ -512,34 +522,52 @@
 
                 const installServer = async () => {
                     isActionLoading.value = true;
+                    loadingMessage.value = "SteamCMD synchronisiert Spieldateien...";
                     await fetch(`/api/server/install/${selectedPlugin.value}`, { method: 'POST' });
                     isActionLoading.value = false;
                     fetchStats();
                 };
 
-                // FIX: Server komplett löschen und sauber aus der Seitenleiste entfernen
-                const deleteServer = async () => {
-                    if (!confirm(`WARNUNG:\nMöchtest du den Server '${currentServerData.value.server_name}' samt Backups KOMPLETT von der Festplatte löschen?`)) return;
-                    const res = await fetch(`/api/server/delete/${selectedPlugin.value}`, { method: 'DELETE' });
-                    const data = await res.json();
-                    alert(data.message || data.detail);
-                    if(data.status === "success" || res.ok) {
-                        openMarketplace();
-                        loadInstalledPlugins();
-                    }
+                const startServer = async () => {
+                    isActionLoading.value = true;
+                    loadingMessage.value = "Initialisiere Prozessumgebung...";
+                    await fetch(`/api/server/start/${selectedPlugin.value}`, { method: 'POST' });
+                    isActionLoading.value = false;
+                    setTimeout(fetchStats, 1000);
                 };
 
-                onMounted(() => {
+                const stopServer = async () => {
+                    isActionLoading.value = true;
+                    loadingMessage.value = "Sende ACPI-Shutdown Signal...";
+                    await fetch(`/api/server/stop/${selectedPlugin.value}`, { method: 'POST' });
+                    isActionLoading.value = false;
+                    setTimeout(fetchStats, 500);
+                };
+
+                const deleteServer = async () => {
+                    if (!confirm(`Möchtest du den Server komplett entfernen?`)) return;
+                    await fetch(`/api/server/delete/${selectedPlugin.value}`, { method: 'DELETE' });
+                    openMarketplace();
                     loadInstalledPlugins();
-                    openMarketplace(); // Startet standardmäßig in der Erstellen-Ansicht
-                    statsInterval = setInterval(fetchStats, 2000);
-                });
+                };
+
+                const openLocalFolder = () => fetch(`/api/server/open-folder/${selectedPlugin.value}`, { method: 'POST' });
+                const openMarketplace = () => { currentView.value = "marketplace"; selectedPlugin.value = null; fetch('/api/plugins/available').then(r => r.json()).then(d => availablePlugins.value = d).catch(() => {}); };
+                const addSchedule = () => { if(!newSchedVal.value) return; backupSchedule.value.schedules.push({ type: newSchedType.value, value: newSchedVal.value }); saveBackupSettings(); newSchedVal.value = ""; };
+                const removeSchedule = (idx) => { backupSchedule.value.schedules.splice(idx, 1); saveBackupSettings(); };
+                const saveBackupSettings = async () => { await fetch(`/api/server/backup/schedule/${selectedPlugin.value}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(backupSchedule.value) }); };
+                const applyFix = async (fixType) => { isActionLoading.value = true; const res = await fetch(`/api/server/diagnostics/fix/${selectedPlugin.value}/${fixType}`, { method: 'POST' }); const data = await res.json(); alert(data.message); isActionLoading.value = false; fetchStats(); };
+                const createBackup = async () => { await fetch(`/api/server/backup/create/${selectedPlugin.value}`, { method: 'POST' }); fetchBackups(); };
+                const restoreBackup = async (filename) => { if (!confirm(`Backup '${filename}' einspielen?`)) return; await fetch(`/api/server/backup/restore/${selectedPlugin.value}/${filename}`, { method: 'POST' }); };
+                const deleteBackup = async (filename) => { if (!confirm(`ZIP-Archiv löschen?`)) return; await fetch(`/api/server/backup/delete/${selectedPlugin.value}/${filename}`, { method: 'DELETE' }); fetchBackups(); };
+
+                onMounted(() => { loadInstalledPlugins(); openMarketplace(); statsInterval = setInterval(fetchStats, 2000); });
                 onUnmounted(() => { clearInterval(statsInterval); });
 
                 return {
                     currentView, serverTab, selectedPlugin, isActionLoading, isSubscribing, loadingMessage,
-                    serverStats, installedPlugins, availablePlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs,
-                    selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin
+                    serverStats, installedPlugins, availablePlugins, backupList, configData, backupSchedule, newSchedType, newSchedVal, categorizedPlugins, currentServerData, consoleLogs, activeDiagnostics, activeMods, newModId,
+                    selectServer, openConfigTab, saveConfig, openBackupTab, openConsoleTab, openModsTab, fetchMods, addMod, deleteMod, addSchedule, removeSchedule, saveBackupSettings, createBackup, restoreBackup, deleteBackup, openLocalFolder, startServer, stopServer, openMarketplace, deleteServer, installServer, subscribePlugin, applyFix
                 };
             }
         }).mount('#app');
