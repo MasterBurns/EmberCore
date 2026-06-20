@@ -1,11 +1,7 @@
 {
-  "version": "v0.1.1",
+  "version": "v0.1.2",
   "build_date": "2026-06-20",
   "changelog": [
-    "🚀 NEU: Auto-Update System für EmberCore via Git integriert.",
-    "🚀 NEU: Optionale SteamCMD Auto-Updates beim Serverstart.",
-    "🔌 FEATURE: Mod-Management über die Steam Web-API integriert.",
-    "🐛 FIX: DAU-sichere Reparatur von alten JSON-Konfigurationen.",
-    "📟 FEATURE: Live-Konsole fängt stdout-Logs asynchron ab."
+    "Windows intergration"
   ]
 }
