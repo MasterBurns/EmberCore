@@ -1,5 +1,11 @@
 [
   {
+  "version": "v0.1.4.1",
+  "build_date": "2024-03-24",
+  "changelog": [
+    "FIX: Syntax error in Firewall integration"
+  ]
+  {
   "version": "v0.1.4",
   "build_date": "2024-03-24",
   "changelog": [
