@@ -406,7 +406,7 @@ def load_manifest(plugin_id: str):
     with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
 
 
-# --- OS SERVICE & SYSTEM ROUTEN (REPARIERT: PowerShell statt cmd.exe) ---
+# --- OS SERVICE & SYSTEM ROUTEN ---
 
 @app.get("/api/system/health")
 def system_health():
@@ -480,22 +480,28 @@ def install_system_service():
         else:
             import ctypes
             ps_script = os.path.join(EXE_DIR, "install_service.ps1")
-            executable = exe_path if IS_COMPILED else sys.executable
-            arguments = "--service" if IS_COMPILED else f"'{exe_path}' --service"
+            executable = os.path.abspath(exe_path if IS_COMPILED else sys.executable)
+
+            # Hier fixen wir das Quoting für den Windows Task-Scheduler über PowerShell Backticks
+            if IS_COMPILED:
+                ps_arguments = "--service"
+            else:
+                ps_arguments = f'`"{os.path.abspath(exe_path)}`" --service'
 
             with open(ps_script, "w", encoding="utf-8") as f:
-                f.write(f"$action = New-ScheduledTaskAction -Execute '{executable}' -Argument \"{arguments}\"\n")
+                f.write(f'$action = New-ScheduledTaskAction -Execute "{executable}" -Argument "{ps_arguments}"\n')
                 f.write("$trigger = New-ScheduledTaskTrigger -AtStartup\n")
                 f.write("$principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\n")
                 f.write("Register-ScheduledTask -TaskName 'EmberCoreDaemon' -Action $action -Trigger $trigger -Principal $principal -Force\n")
                 f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
+                # -NoExit hinzugefügt und -WindowStyle Hidden entfernt, damit wir den Fehler im Fenster sehen!
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -NoExit -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
-                return {"status": "info", "message": "Bitte bestätige jetzt das kleine Windows Administrator-Schild in der Taskleiste.\nEmberCore installiert sich dann selbst als Dienst und startet sofort!"}
+                return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service zu installieren!"}
             else:
-                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True)
                 return {"status": "success", "message": "EmberCore wurde erfolgreich als Windows Service installiert!"}
     except Exception as e:
         return {"status": "error", "message": f"Konnte Service nicht erstellen: {e}"}
@@ -522,15 +528,15 @@ def uninstall_system_service():
         with open(ps_script, "w", encoding="utf-8") as f:
             f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
             f.write("Unregister-ScheduledTask -TaskName 'EmberCoreDaemon' -Confirm:$false -ErrorAction SilentlyContinue\n")
-            f.write(f"Get-WmiObject Win32_Process | Where-Object {{ $_.CommandLine -match '--service' -and $_.Name -eq '{os.path.basename(sys.executable)}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+            f.write(f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
 
         if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-            ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
+            ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -NoExit -File \"{ps_script}\"' -Verb RunAs"
             subprocess.run(["powershell", "-Command", ps_cmd])
-            return {"status": "info", "message": "Bitte bestätige jetzt die Administrator-Freigabe, um den Service restlos vom PC zu entfernen und zu stoppen."}
+            return {"status": "info", "message": "Windows UAC-Fenster geöffnet. Bitte bestätigen, um den Service restlos zu entfernen!"}
         else:
             try:
-                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script], check=True)
                 return {"status": "success", "message": "Windows Service erfolgreich entfernt."}
             except Exception as e: return {"status": "error", "message": "Konnte Dienst nicht löschen."}
 
@@ -548,11 +554,11 @@ def start_system_service():
                 f.write("Start-ScheduledTask -TaskName 'EmberCoreDaemon'\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -NoExit -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
             else:
                 subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
-        return {"status": "success", "message": "Service-Start wurde im Hintergrund angefordert."}
+        return {"status": "success", "message": "Service-Start wurde angefordert."}
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @app.post("/api/system/service/stop")
@@ -567,10 +573,10 @@ def stop_system_service():
             ps_script = os.path.join(EXE_DIR, "stop_service.ps1")
             with open(ps_script, "w", encoding="utf-8") as f:
                 f.write("Stop-ScheduledTask -TaskName 'EmberCoreDaemon' -ErrorAction SilentlyContinue\n")
-                f.write(f"Get-WmiObject Win32_Process | Where-Object {{ $_.CommandLine -match '--service' -and $_.Name -eq '{os.path.basename(sys.executable)}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
+                f.write(f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -match '--service' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}\n")
 
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
-                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ps_script}\"' -Verb RunAs"
+                ps_cmd = f"Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -NoExit -File \"{ps_script}\"' -Verb RunAs"
                 subprocess.run(["powershell", "-Command", ps_cmd])
             else:
                 subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", ps_script])
