@@ -158,6 +158,15 @@ def get_installed_plugins():
                 except: pass
     return installed
 
+@app.get("/api/plugins/available")
+async def get_available_plugins():
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins_directory.json", timeout=5.0)
+            return res.json() if res.status_code == 200 else []
+    except: return []
+
 @app.post("/api/plugins/subscribe/{plugin_id}")
 async def subscribe_plugin(plugin_id: str, url: str):
     # Live-Downloads landen immer im flüchtigen plugins/ Ordner
