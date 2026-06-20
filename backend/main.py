@@ -427,16 +427,22 @@ def system_service_status():
             except: pass
     else:
         try:
-            # FIX: Kugelsichere Erkennung über nativen Windows-Befehl (schtasks) statt PowerShell
-            subprocess.check_output(["schtasks", "/query", "/tn", "EmberCoreDaemon"], stderr=subprocess.DEVNULL)
-            installed = True
+            # FIX: Kugelsichere Erkennung über nativen Windows-Befehl und Return-Code (0 = Task existiert)
+            flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            res = subprocess.run(["schtasks", "/query", "/tn", "EmberCoreDaemon"], capture_output=True, creationflags=flags)
+            installed = (res.returncode == 0)
+
             if installed:
                 running = any("--service" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
-        except subprocess.CalledProcessError:
-            installed = False
+        except: pass
 
     wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
+
+    # FIX: Nur die ECHTE CPU/RAM Auslastung von EmberCore auslesen!
     proc = psutil.Process(os.getpid())
+    ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
+    # interval=0.05 misst kurz die Differenz für diesen spezifischen Prozess
+    ember_cpu = round(proc.cpu_percent(interval=0.05) / psutil.cpu_count(), 1)
 
     return {
         "os": platform.system(),
@@ -445,8 +451,8 @@ def system_service_status():
         "main_pid": os.getpid(),
         "watchdog_active": wd_active,
         "uptime_seconds": (datetime.now() - START_TIME).total_seconds(),
-        "ram_mb": round(proc.memory_info().rss / (1024*1024), 2),
-        "cpu_percent": psutil.cpu_percent()
+        "ram_mb": ember_ram,
+        "cpu_percent": ember_cpu
     }
 
 @app.post("/api/system/service/install")
@@ -812,6 +818,42 @@ def stop(plugin_id: str): return manager.stop_server(plugin_id)
 @app.get("/api/server/stats/{plugin_id}")
 def stats(plugin_id: str):
     data = manager.get_stats(plugin_id)
+
+    # --- KUGELSICHERE RAM & CPU BERECHNUNG (Fängt Conan Exiles 8GB Child-Prozesse) ---
+    if data.get("status") == "online":
+        try:
+            server_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id))
+            target_procs = []
+
+            # Sucht ALLE laufenden Prozesse des Rechners, die im Ordner des Servers liegen!
+            for p in psutil.process_iter(['exe']):
+                try:
+                    exe = p.info.get('exe')
+                    if exe and os.path.abspath(exe).startswith(server_dir):
+                        target_procs.append(psutil.Process(p.pid))
+                except: pass
+
+            if target_procs:
+                total_ram = 0
+                for p in target_procs:
+                    try:
+                        total_ram += p.memory_info().rss
+                        p.cpu_percent(interval=None) # Startpunkt für CPU-Messung
+                    except: pass
+
+                time.sleep(0.05) # Kurzer Moment für die CPU-Delta-Berechnung
+
+                total_cpu = 0.0
+                for p in target_procs:
+                    try:
+                        total_cpu += p.cpu_percent(interval=None)
+                    except: pass
+
+                data["ram_mb"] = round(total_ram / (1024 * 1024), 2)
+                data["cpu_percent"] = round(total_cpu, 1)
+        except Exception:
+            pass
+
     data["disk"] = calculate_disk_trend(plugin_id)
     data["update_info"] = game_update_cache.get(plugin_id, {"available": False})
     return data

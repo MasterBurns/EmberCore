@@ -1,7 +1,15 @@
 [
+    {
+  "version": "v0.1.4.5",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Service Status",
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
   {
   "version": "v0.1.4.4",
-  "build_date": "2026-03-24",
+  "build_date": "2026-06-20",
   "changelog": [
     "FIX: Service -> Taskscheduler unter Windows"
   ]
