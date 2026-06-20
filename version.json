@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.4.8",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
   "version": "v0.1.4.7",
   "build_date": "2026-06-20",
   "changelog": [
