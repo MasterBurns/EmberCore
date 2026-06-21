@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.5.5",
+  "build_date": "2026-06-21",
+  "changelog": [
+    "FIX: zu Aggresives Recovery",
+    "FIX: Logging nicht sofort aktiv"
+  ]
+  },
+  {
   "version": "v0.1.5.4",
   "build_date": "2026-06-21",
   "changelog": [

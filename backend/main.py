@@ -162,6 +162,7 @@ class DummyStream:
     def write(self, *args, **kwargs): pass
     def flush(self, *args, **kwargs): pass
     def close(self, *args, **kwargs): pass
+    def read(self, *args, **kwargs): return b""
 
 class AdoptedProcess:
     def __init__(self, pid):
@@ -170,12 +171,19 @@ class AdoptedProcess:
         self.stdin = DummyStream()
         self.stdout = DummyStream()
         self.stderr = DummyStream()
+        # FIX: Dummy-Werte hinzugefügt, damit der ServerManager beim Auslesen der Logs/Stats nicht crasht!
+        self.returncode = None
+        self.args = []
 
     def poll(self):
         try:
-            if self.ps.is_running() and self.ps.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]: return None
+            if self.ps.is_running() and self.ps.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
+                return None
+            self.returncode = 0
             return 0
-        except psutil.NoSuchProcess: return 0
+        except psutil.NoSuchProcess:
+            self.returncode = 0
+            return 0
 
     def wait(self, timeout=None):
         try: self.ps.wait(timeout)
@@ -200,7 +208,7 @@ def get_server_processes(plugin_id: str):
 
         if verbose: logger.debug(f"[Recovery] --- Starte Such-Scan fuer Server '{plugin_id}' --- | Pfad: {server_dir_clean}")
 
-        # --- STRATEGIE 1: SCAN VIA NETZWERK-PORTS (Absolut unfehlbar fuer Game-Server) ---
+        # --- STRATEGIE 1: SCAN VIA NETZWERK-PORTS ---
         manifest = load_manifest(plugin_id)
         target_ports = []
         if manifest and "network_meta" in manifest and "ports" in manifest["network_meta"]:
@@ -211,14 +219,16 @@ def get_server_processes(plugin_id: str):
         if target_ports:
             if verbose: logger.debug(f"[Recovery] Scanne System-Ports nach offenen Verbindungen fuer: {target_ports}")
             try:
-                # Scant alle offenen Sockets des OS nach den Spiele-Ports
                 for conn in psutil.net_connections(kind='all'):
                     if conn.laddr and conn.laddr.port in target_ports and conn.pid:
                         if conn.pid not in target_procs:
                             try:
                                 proc = psutil.Process(conn.pid)
-                                target_procs[proc.pid] = proc
-                                if verbose: logger.debug(f"[Recovery] Port-Treffer! PID {conn.pid} lauscht auf Port {conn.laddr.port}")
+                                # FIX: Schliesst SteamCMD kategorisch aus, damit es waehrend Updates nicht adoptiert wird!
+                                p_name_check = str(proc.name() or '').lower()
+                                if p_name_check not in ["steamcmd.exe", "embercore.exe", "python.exe"]:
+                                    target_procs[proc.pid] = proc
+                                    if verbose: logger.debug(f"[Recovery] Port-Treffer! PID {conn.pid} ({p_name_check}) lauscht auf Port {conn.laddr.port}")
                             except: pass
             except Exception as e:
                 if verbose: logger.debug(f"[Recovery] Port-Verbindungs-Scan blockiert (Rechte): {e}")
@@ -237,7 +247,13 @@ def get_server_processes(plugin_id: str):
             if p.info['pid'] in target_procs: continue
             try:
                 p_name = str(p.info.get('name') or '').lower()
-                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe", "system idle process"]:
+                # FIX: steamcmd.exe und steamerrorreporter zur Ignore-Liste hinzugefuegt
+                if p_name in [
+                    "embercore.exe", "python.exe", "cmd.exe", "conhost.exe",
+                    "embercoreservice.exe", "winsw-x64.exe", "explorer.exe",
+                    "svchost.exe", "system idle process", "steamcmd.exe",
+                    "steamerrorreporter.exe", "steamerrorreporter64.exe"
+                ]:
                     continue
 
                 matched = False
@@ -264,7 +280,7 @@ def get_server_processes(plugin_id: str):
                     if verbose: logger.debug(f"[Recovery] Pfad-Treffer! PID {proc.pid} ({p_name}) zugeordnet.")
             except: pass
 
-        # Alle Tochter-Prozesse (Child-Engines) rekursiv einsammeln
+        # Alle Tochter-Prozesse rekursiv einsammeln
         all_procs = {}
         for pid, proc in target_procs.items():
             all_procs[pid] = proc
@@ -277,6 +293,19 @@ def get_server_processes(plugin_id: str):
     except Exception as e:
         logger.error(f"[Recovery] Fehler im Haupt-Scanner: {e}")
     return target_procs
+
+def is_server_online(plugin_id: str) -> bool:
+    procs = get_server_processes(plugin_id)
+    if procs:
+        if plugin_id not in manager.processes:
+            main_pid = min(procs.keys())
+            manager.processes[plugin_id] = AdoptedProcess(main_pid)
+            logger.info(f"[Recovery] Server '{plugin_id}' erfolgreich im OS abgefangen! (Haupt-PID: {main_pid})")
+        return True
+    else:
+        if plugin_id in manager.processes: del manager.processes[plugin_id]
+        return False
+# =========================================================================
 
 def is_server_online(plugin_id: str) -> bool:
     procs = get_server_processes(plugin_id)
@@ -613,9 +642,24 @@ def load_manifest(plugin_id: str):
 # =========================================================================
 # SYSTEM & LOGGING API
 # =========================================================================
-@app.get("/api/system/settings")
-def get_sys_settings():
-    return sys_config
+@app.post("/api/system/settings")
+def save_sys_settings(data: dict = Body(...)):
+    global sys_config
+    sys_config.update(data)
+    with open(SYS_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(sys_config, f, indent=2)
+
+    is_verbose = sys_config.get("verbose_logging")
+
+    # 1. Unseren eigenen EmberCore-Logger live anpassen
+    logger.setLevel(logging.DEBUG if is_verbose else logging.INFO)
+
+    # 2. FIX: Dem laufenden Uvicorn-Webserver live den Spam-Hahn auf/zu drehen!
+    uvicorn_logger = logging.getLogger("uvicorn.access")
+    uvicorn_logger.setLevel(logging.INFO if is_verbose else logging.WARNING)
+
+    logger.info(f"System-Settings gespeichert. Verbose Logging: {is_verbose}")
+    return {"status": "success"}
 
 @app.post("/api/system/settings")
 def save_sys_settings(data: dict = Body(...)):
