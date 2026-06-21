@@ -12,6 +12,14 @@ ports:
 backup:
   source_path: "ConanSandbox/Saved"
 
+shutdown:
+  rcon:
+    port: 25575
+    port_key: "RconPort" # Der Schlüsselname in der ServerSettings.ini
+    config_path: "ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini"
+    password_key: "AdminPassword"
+    command: "CloseServer"
+
 mods_meta:
   file_path: "ConanSandbox/Mods/modlist.txt"
   workshop_url_template: "https://steamcommunity.com/sharedfiles/filedetails/?id="

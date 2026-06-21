@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.5.4",
+  "build_date": "2026-06-21",
+  "changelog": [
+    "NEU: RCON Logik für Stop",
+    "NEU: Plugin / Server Manifest Update"
+  ]
+  },
+  {
   "version": "v0.1.5.3",
   "build_date": "2026-06-20",
   "changelog": [

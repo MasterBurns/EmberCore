@@ -200,71 +200,82 @@ def get_server_processes(plugin_id: str):
 
         if verbose: logger.debug(f"[Recovery] --- Starte Such-Scan fuer Server '{plugin_id}' --- | Pfad: {server_dir_clean}")
 
+        # --- STRATEGIE 1: SCAN VIA NETZWERK-PORTS (Absolut unfehlbar fuer Game-Server) ---
+        manifest = load_manifest(plugin_id)
+        target_ports = []
+        if manifest and "network_meta" in manifest and "ports" in manifest["network_meta"]:
+            for p_info in manifest["network_meta"]["ports"]:
+                if "port" in p_info:
+                    target_ports.append(int(p_info["port"]))
+
+        if target_ports:
+            if verbose: logger.debug(f"[Recovery] Scanne System-Ports nach offenen Verbindungen fuer: {target_ports}")
+            try:
+                # Scant alle offenen Sockets des OS nach den Spiele-Ports
+                for conn in psutil.net_connections(kind='all'):
+                    if conn.laddr and conn.laddr.port in target_ports and conn.pid:
+                        if conn.pid not in target_procs:
+                            try:
+                                proc = psutil.Process(conn.pid)
+                                target_procs[proc.pid] = proc
+                                if verbose: logger.debug(f"[Recovery] Port-Treffer! PID {conn.pid} lauscht auf Port {conn.laddr.port}")
+                            except: pass
+            except Exception as e:
+                if verbose: logger.debug(f"[Recovery] Port-Verbindungs-Scan blockiert (Rechte): {e}")
+
+        # --- STRATEGIE 2: SCAN VIA PROCESS CACHE ---
         if plugin_id in manager.processes:
             try:
                 parent_proc = psutil.Process(manager.processes[plugin_id].pid)
                 if parent_proc.is_running() and parent_proc.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
                     target_procs[parent_proc.pid] = parent_proc
-                    for child in parent_proc.children(recursive=True): target_procs[child.pid] = child
-                    return target_procs
-                else:
-                    if verbose: logger.debug(f"[Recovery] PID {manager.processes[plugin_id].pid} im Cache ist tot.")
-                    del manager.processes[plugin_id]
             except psutil.NoSuchProcess:
-                if verbose: logger.debug("[Recovery] PID aus Cache existiert nicht mehr.")
                 del manager.processes[plugin_id]
 
-        scanned = 0
-        matched_count = 0
+        # --- STRATEGIE 3: KLASSISCHER PFAD- & CMDLINE SCAN ---
         for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name', 'cmdline']):
-            scanned += 1
+            if p.info['pid'] in target_procs: continue
             try:
                 p_name = str(p.info.get('name') or '').lower()
-                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe", "system idle process", "system", "registry"]:
+                if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe", "system idle process"]:
                     continue
 
                 matched = False
-                match_reason = ""
-
                 exe = p.info.get('exe')
                 cwd = p.info.get('cwd')
                 cmdline = p.info.get('cmdline')
 
-                if exe:
-                    exe_clean = os.path.normcase(os.path.realpath(exe))
-                    if exe_clean.startswith(server_dir_clean):
-                        matched = True
-                        match_reason = f"EXE ({exe_clean})"
-
+                if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean):
+                    matched = True
                 if not matched and cwd:
                     cwd_path = os.path.normcase(os.path.realpath(cwd))
                     cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
                     if cwd_path.startswith(server_dir_clean):
                         matched = True
-                        match_reason = f"CWD ({cwd_path})"
-
                 if not matched and cmdline:
                     cmd_safe = [str(x) for x in cmdline if x is not None]
                     cmd_str = " ".join(cmd_safe).lower()
                     if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str:
                         matched = True
-                        match_reason = f"CMDLINE ({cmd_str})"
 
                 if matched:
                     proc = psutil.Process(p.info['pid'])
                     target_procs[proc.pid] = proc
-                    matched_count += 1
-                    if verbose: logger.debug(f"[Recovery] TREFFER! PID {proc.pid} ({p_name}) adoptiert via {match_reason}")
-                    for child in proc.children(recursive=True):
-                        try: target_procs[child.pid] = child
-                        except: pass
-            except (psutil.AccessDenied, psutil.NoSuchProcess): pass
-            except Exception as e: pass
+                    if verbose: logger.debug(f"[Recovery] Pfad-Treffer! PID {proc.pid} ({p_name}) zugeordnet.")
+            except: pass
 
-        if verbose and matched_count > 0:
-            logger.debug(f"[Recovery] Scan beendet. {scanned} PIDs gescannt. {matched_count} Haupt-Treffer gefunden.")
+        # Alle Tochter-Prozesse (Child-Engines) rekursiv einsammeln
+        all_procs = {}
+        for pid, proc in target_procs.items():
+            all_procs[pid] = proc
+            try:
+                for child in proc.children(recursive=True):
+                    all_procs[child.pid] = child
+            except: pass
+
+        return all_procs
     except Exception as e:
-        logger.error(f"[Recovery] Schwerer Fehler beim Scannen: {str(e)}")
+        logger.error(f"[Recovery] Fehler im Haupt-Scanner: {e}")
     return target_procs
 
 def is_server_online(plugin_id: str) -> bool:
@@ -273,7 +284,7 @@ def is_server_online(plugin_id: str) -> bool:
         if plugin_id not in manager.processes:
             main_pid = min(procs.keys())
             manager.processes[plugin_id] = AdoptedProcess(main_pid)
-            logger.info(f"[Recovery] Server '{plugin_id}' wurde im Hintergrund entdeckt und adoptiert! (PID: {main_pid})")
+            logger.info(f"[Recovery] Server '{plugin_id}' erfolgreich im OS abgefangen! (Haupt-PID: {main_pid})")
         return True
     else:
         if plugin_id in manager.processes: del manager.processes[plugin_id]
@@ -542,9 +553,62 @@ def get_plugin_paths(plugin_id: str):
     return live_path, os.path.join(PLUGINS_ROOT, plugin_id), False
 
 def load_manifest(plugin_id: str):
-    manifest_path, _, _ = get_plugin_paths(plugin_id)
-    if not os.path.exists(manifest_path): return None
-    with open(manifest_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
+    dev_path = os.path.join(DEV_PLUGINS_ROOT, plugin_id, "manifest.yaml")
+    live_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
+
+    # Wenn es ein Entwicklungs-Plugin ist, laden wir es direkt ohne Migration
+    if os.path.exists(dev_path):
+        with open(dev_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
+
+    if not os.path.exists(live_path): return None
+
+    # Lokales Instanz-Manifest laden
+    with open(live_path, "r", encoding="utf-8") as f:
+        local_manifest = yaml.safe_load(f)
+
+    # --- AUTOMATISCHE SCHE-MIGRATION (UPDATING) ---
+    # Wir suchen nach dem globalen Core-Template, das durch das EmberCore-Update aktualisiert wurde
+    # (z.B. im internen Anwendungs-Ordner BASE_DIR/plugins_templates/ oder direkt aus dem Verzeichnis der verfügbaren Cloud-Plugins)
+    template_name = plugin_id.split('_')[0] # Schneidet den Instanz-Namen ab (z.B. "conan" aus "conan_pve_server")
+
+    # Optionaler Check: Wenn du die Ur-Templates mit im Build auslieferst
+    global_template_path = os.path.join(BASE_DIR, "static", "templates", f"{template_name}.yaml")
+
+    if os.path.exists(global_template_path):
+        try:
+            with open(global_template_path, "r", encoding="utf-8") as f:
+                global_manifest = yaml.safe_load(f)
+
+            migrated = False
+            # Prüfe wichtige Key-Blöcke, die im Core-Update neu dazugekommen sein könnten
+            for key in ["shutdown", "diagnostics", "lists_meta", "mods_meta"]:
+                if key in global_manifest and key not in local_manifest:
+                    local_manifest[key] = global_manifest[key]
+                    migrated = True
+                    logger.info(f"[Schema Sync] Migriere fehlenden Block '{key}' in Instanz '{plugin_id}'")
+
+            # Neue Config-Felder mergen, ohne alte zu löschen
+            if "config_meta" in global_manifest and "fields" in global_manifest["config_meta"]:
+                if "config_meta" not in local_manifest: local_manifest["config_meta"] = {"fields": []}
+                local_keys = {f["key"] for f in local_manifest["config_meta"].get("fields", [])}
+
+                for field in global_manifest["config_meta"]["fields"]:
+                    if field["key"] not in local_keys:
+                        if "fields" not in local_manifest["config_meta"]: local_manifest["config_meta"]["fields"] = []
+                        local_manifest["config_meta"]["fields"].append(field)
+                        migrated = True
+                        logger.info(f"[Schema Sync] Neues Einstellungsfeld '{field['key']}' in Instanz '{plugin_id}' injiziert.")
+
+            # Falls Änderungen vorgenommen wurden, schreiben wir das Manifest der Instanz neu
+            if migrated:
+                with open(live_path, "w", encoding="utf-8") as f:
+                    yaml.dump(local_manifest, f, allow_unicode=True, default_flow_style=False)
+                logger.info(f"[Schema Sync] Instanz-Manifest '{plugin_id}' erfolgreich auf den neuesten Stand gebracht!")
+
+        except Exception as e:
+            logger.error(f"[Schema Sync] Fehler bei der Manifest-Migration: {e}")
+
+    return local_manifest
 
 # =========================================================================
 # SYSTEM & LOGGING API
@@ -1035,15 +1099,113 @@ def start(plugin_id: str):
 
 @app.post("/api/server/stop/{plugin_id}")
 def stop(plugin_id: str):
-    procs = get_server_processes(plugin_id)
-    for p in procs.values():
-        try:
-            for child in p.children(recursive=True):
-                try: child.kill()
-                except: pass
-            p.kill()
-        except: pass
+    import struct
+    logger.info(f"[-] Stoppen von Server '{plugin_id}' angefordert...")
 
+    procs = get_server_processes(plugin_id)
+    if not procs:
+        logger.warning(f"[!] Stop-Befehl ignoriert: Keine aktiven Prozesse fuer '{plugin_id}' gefunden.")
+        if plugin_id in manager.processes: del manager.processes[plugin_id]
+        try: manager.stop_server(plugin_id)
+        except: pass
+        return {"status": "success"}
+
+    manifest = load_manifest(plugin_id)
+    graceful_exit_triggered = False
+
+    # ==========================================
+    # STUFE 1: RCON SHUTDOWN (Der Gold-Standard)
+    # ==========================================
+    if manifest and "shutdown" in manifest and "rcon" in manifest["shutdown"]:
+        rcon_meta = manifest["shutdown"]["rcon"]
+        try:
+            logger.info("[Recovery] Analysiere RCON-Konfiguration...")
+            live_ini_path = os.path.join(SERVERS_ROOT, plugin_id, rcon_meta.get("config_path", ""))
+            live_cfg = parse_live_config_file(live_ini_path)
+
+            # Dynamischen RCON-Port ermitteln
+            port_key = rcon_meta.get("port_key", "RconPort")
+            rcon_port = live_cfg.get(port_key)
+
+            if not rcon_port:
+                rcon_port = int(rcon_meta.get("port", 25575))
+                logger.info(f"[Recovery] Kein RconPort in .ini gefunden. Setze Standard: {rcon_port}")
+
+                desired_dir = os.path.join(DATA_ROOT, plugin_id)
+                desired_path = os.path.join(desired_dir, "desired_config.json")
+                current_desired = {}
+                if os.path.exists(desired_path):
+                    with open(desired_path, "r", encoding="utf-8") as df: current_desired = json.load(df)
+
+                if port_key not in current_desired:
+                    current_desired[port_key] = rcon_port
+                    with open(desired_path, "w", encoding="utf-8") as df: json.dump(current_desired, df, indent=2)
+                    apply_desired_config_to_live(plugin_id)
+            else:
+                rcon_port = int(rcon_port)
+                logger.info(f"[Recovery] Dynamischen RCON-Port aus .ini gelesen: {rcon_port}")
+
+            # Passwort lesen und RCON Befehl senden
+            password = rcon_meta.get("default_password", "")
+            if "password_key" in rcon_meta:
+                password = live_cfg.get(rcon_meta["password_key"], password)
+
+            cmd = rcon_meta.get("command", "CloseServer")
+
+            with socket.create_connection(("127.0.0.1", rcon_port), timeout=3) as s:
+                auth = struct.pack('<iii', 10, 3, 0) + password.encode('utf-8') + b'\x00\x00'
+                s.sendall(struct.pack('<i', len(auth)) + auth)
+                s.recv(4096) # Auth-Antwort verwerfen
+
+                cmd_pkt = struct.pack('<iii', 11, 2, 0) + cmd.encode('utf-8') + b'\x00\x00'
+                s.sendall(struct.pack('<i', len(cmd_pkt)) + cmd_pkt)
+                logger.info(f"[+] RCON-Befehl '{cmd}' erfolgreich gesendet. Server speichert ab.")
+                graceful_exit_triggered = True
+
+        except Exception as e:
+            logger.warning(f"[!] RCON-Shutdown fehlgeschlagen: {e}")
+
+    # ==========================================
+    # STUFE 2: OS SOFT-KILL (WM_CLOSE)
+    # ==========================================
+    if not graceful_exit_triggered:
+        logger.info("[Recovery] Sende Soft-Kill Signal an OS...")
+        for pid, p in procs.items():
+            try: p.terminate() # Sendet SIGTERM
+            except: pass
+            if platform.system() == "Windows":
+                # OHNE /F! Das bittet die Anwendung freundlich, sich zu beenden.
+                flags = subprocess.CREATE_NO_WINDOW
+                subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True, creationflags=flags)
+
+    # --- Warten & Beobachten (Geduld für das Abspeichern) ---
+    logger.info("[Recovery] Warte bis zu 15 Sekunden auf Beendigung der Prozesse...")
+    for _ in range(15):
+        still_alive = any(p.is_running() and p.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD] for p in procs.values())
+        if not still_alive:
+            logger.info("[+] Server hat sich erfolgreich und sauber beendet!")
+            break
+        time.sleep(1)
+
+    # ==========================================
+    # STUFE 3: HARD-KILL (Die Notbremse)
+    # ==========================================
+    still_alive = any(p.is_running() and p.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD] for p in procs.values())
+    if still_alive:
+        logger.warning("[!] Server haengt! Ziehe die Notbremse (Hard-Kill)...")
+        for pid, p in procs.items():
+            if p.is_running() and p.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD]:
+                try:
+                    for child in p.children(recursive=True):
+                        try: child.kill()
+                        except: pass
+                    p.kill()
+                except: pass
+                if platform.system() == "Windows":
+                    flags = subprocess.CREATE_NO_WINDOW
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, creationflags=flags)
+
+    # Manager Speicher aufraeumen
     if plugin_id in manager.processes:
         try: manager.processes[plugin_id].terminate()
         except: pass
