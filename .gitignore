@@ -6,6 +6,7 @@ dist/
 build/
 data/
 servers/
+logs/
 
 # Flüchtige EmberCore Runtime-Daten (NIEMALS im Git)
 backend/servers/

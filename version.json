@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.6",
+  "build_date": "2026-06-25",
+  "changelog": [
+    "NEU: Code Refractoring",
+    "NEU: Updatelogic für Steammods per SteamCMD"
+  ]
+  },
+  {
   "version": "v0.1.5.5",
   "build_date": "2026-06-21",
   "changelog": [

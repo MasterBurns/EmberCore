@@ -22,8 +22,8 @@ shutdown:
 
 mods_meta:
   file_path: "ConanSandbox/Mods/modlist.txt"
-  workshop_url_template: "https://steamcommunity.com/sharedfiles/filedetails/?id="
-  steam_workshop_appid: 443030 # Conan Exiles nutzt die Hauptspiel-ID für den Workshop
+  steam_workshop_appid: "440900"
+  download_via_steamcmd: true
 
 # --- Fehler-Erkennungsmuster für die Log-Analyse ---
 diagnostics:
