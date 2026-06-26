@@ -160,7 +160,8 @@ export const api = {
         const exists = store.installedPlugins.find(p => p.server_name.toLowerCase() === customName.trim().toLowerCase());
         if (exists) { await this.appAlert("Ein Server mit diesem Namen existiert bereits!", "Fehler"); return; }
         store.isSubscribing = plugin.id;
-        const endpoint = `/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(plugin.zip_url)}&server_name=${encodeURIComponent(customName.trim())}`;
+        const downloadUrl = plugin.yaml_url || plugin.zip_url;
+        const endpoint = `/api/plugins/subscribe/${plugin.id}?url=${encodeURIComponent(downloadUrl)}&server_name=${encodeURIComponent(customName.trim())}`;
         try {
             const res = await fetch(endpoint, { method: 'POST' }); const data = await res.json();
             if (data.status === "error") await this.appAlert(data.message || data.detail, "Installationsfehler");
