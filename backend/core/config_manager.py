@@ -1,4 +1,4 @@
-import os, yaml, json, re
+import os, yaml, json, re, httpx
 from core.env import DEV_PLUGINS_ROOT, PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT, BASE_DIR, logger
 
 class ConfigManager:
@@ -8,6 +8,49 @@ class ConfigManager:
         live_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
         if os.path.exists(dev_path): return dev_path, os.path.join(DEV_PLUGINS_ROOT, plugin_id), True
         return live_path, os.path.join(PLUGINS_ROOT, plugin_id), False
+
+    @staticmethod
+    def sync_manifest_from_cloud(plugin_id: str):
+        dev_path, live_dir, is_dev = ConfigManager.get_plugin_paths(plugin_id)
+        if is_dev: return  # Lokale Entwickler-Plugins niemals überschreiben!
+
+        live_path = os.path.join(live_dir, "manifest.yaml")
+        if not os.path.exists(live_path): return
+
+        try:
+            with open(live_path, "r", encoding="utf-8") as f: local_manifest = yaml.safe_load(f)
+            source_url = local_manifest.get("source_url")
+
+            # Fallback für Server, die VOR diesem Feature installiert wurden
+            if not source_url:
+                try:
+                    res_dir = httpx.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins_directory.json", timeout=5.0)
+                    if res_dir.status_code == 200:
+                        for p in res_dir.json():
+                            # Finde Server via Steam-ID oder Name
+                            if str(p.get("steam_app_id", "")) == str(local_manifest.get("steam_app_id", "")) or p.get("name") == local_manifest.get("name"):
+                                source_url = p.get("yaml_url")
+                                break
+                except: pass
+
+            # Nur reine YAML-URLs synchronisieren (Keine ZIPs)
+            if not source_url or source_url.endswith(".zip"): return
+
+            # Manifest herunterladen
+            res = httpx.get(source_url, follow_redirects=True, timeout=5.0)
+            if res.status_code == 200 and b"PK\x03\x04" not in res.content[:4]:
+                new_manifest = yaml.safe_load(res.content)
+
+                # Wichtig: Die lokale ID und die Quell-URL in das frische Manifest übernehmen!
+                new_manifest["id"] = local_manifest.get("id", plugin_id)
+                new_manifest["source_url"] = source_url
+
+                with open(live_path, "w", encoding="utf-8") as f:
+                    yaml.dump(new_manifest, f, allow_unicode=True, sort_keys=False)
+
+                logger.info(f"[Cloud Sync] Manifest für '{plugin_id}' erfolgreich aus GitHub aktualisiert!")
+        except Exception as e:
+            logger.warning(f"[Cloud Sync] Konnte Manifest nicht synchronisieren: {e}")
 
     @staticmethod
     def load_manifest(plugin_id: str):
@@ -20,7 +63,7 @@ class ConfigManager:
 
         with open(live_path, "r", encoding="utf-8") as f: local_manifest = yaml.safe_load(f)
 
-        # Schema Sync
+        # Lokaler Schema Sync (Für abwärtskompatible Templates)
         template_name = plugin_id.split('_')[0]
         global_template_path = os.path.join(BASE_DIR, "static", "templates", f"{template_name}.yaml")
         if not os.path.exists(global_template_path):

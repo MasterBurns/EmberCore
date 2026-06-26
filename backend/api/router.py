@@ -13,16 +13,122 @@ from core.env import (
 from core.server_manager import server_manager
 from core.config_manager import ConfigManager
 
-# === NEU: Manager hier direkt instanziieren (Bricht den PyInstaller-Kreis für immer!) ===
 from core.steamcmd_manager import SteamCMDManager
 from core.backup_manager import BackupManager
 steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
-# =======================================================================================
 
 router = APIRouter(prefix="/api")
 
 class InstallRequest(BaseModel): install_dir_name: str = None
+
+# ==========================================
+# CLUSTER MANAGEMENT (ARK, etc.)
+# ==========================================
+def get_clusters_db():
+    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
+    if os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {}
+
+def save_clusters_db(data):
+    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
+    with open(db_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+@router.get("/clusters")
+def get_clusters():
+    return get_clusters_db()
+
+@router.post("/clusters/create")
+def create_cluster(payload: dict = Body(...)):
+    cluster_id = payload.get("cluster_id")
+    name = payload.get("name", "Neuer Cluster")
+    if not cluster_id: return {"status": "error", "message": "Keine Cluster-ID angegeben."}
+
+    db = get_clusters_db()
+    if cluster_id in db: return {"status": "error", "message": "Cluster-ID existiert bereits."}
+
+    shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
+    os.makedirs(shared_dir, exist_ok=True)
+
+    db[cluster_id] = {
+        "name": name,
+        "shared_dir": shared_dir,
+        "members": []
+    }
+    save_clusters_db(db)
+    return {"status": "success", "message": f"Cluster '{name}' erstellt!"}
+
+@router.post("/clusters/assign/{cluster_id}/{plugin_id}")
+def assign_to_cluster(cluster_id: str, plugin_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    # Aus alten Clustern entfernen
+    for cid, cdata in db.items():
+        if plugin_id in cdata["members"]:
+            cdata["members"].remove(plugin_id)
+
+    # PORT-KOLLISIONS-PRÜFUNG
+    manifest = ConfigManager.load_manifest(plugin_id)
+    if manifest and "config_meta" in manifest:
+        desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+        new_desired = {}
+        if os.path.exists(desired_path):
+            try:
+                with open(desired_path, "r", encoding="utf-8") as f: new_desired = json.load(f)
+            except: pass
+
+        used_ports = set()
+        for member in db[cluster_id]["members"]:
+            m_desired_path = os.path.join(DATA_ROOT, member, "desired_config.json")
+            if os.path.exists(m_desired_path):
+                try:
+                    with open(m_desired_path, "r", encoding="utf-8") as f:
+                        m_data = json.load(f)
+                        for k, v in m_data.items():
+                            if "port" in k.lower():
+                                try: used_ports.add(int(v))
+                                except: pass
+                except: pass
+
+        updated_ports = False
+        for field in manifest["config_meta"].get("fields", []):
+            key = field["key"]
+            if "port" in key.lower():
+                current_port = int(new_desired.get(key, field.get("default", 0)))
+                original_port = current_port
+
+                while current_port in used_ports:
+                    current_port += 2
+
+                if current_port != original_port:
+                    new_desired[key] = current_port
+                    used_ports.add(current_port)
+                    updated_ports = True
+
+        if updated_ports:
+            logger.info(f"[*] Port-Konflikt in Cluster '{cluster_id}' gelöst! Neue Ports gespeichert.")
+            os.makedirs(os.path.dirname(desired_path), exist_ok=True)
+            with open(desired_path, "w", encoding="utf-8") as f: json.dump(new_desired, f, indent=2)
+            ConfigManager.apply_desired_config(plugin_id)
+
+    db[cluster_id]["members"].append(plugin_id)
+    save_clusters_db(db)
+    return {"status": "success", "message": f"Server zum Cluster hinzugefügt (Ports automatisch abgeglichen)."}
+
+@router.post("/clusters/remove/{plugin_id}")
+def remove_from_cluster(plugin_id: str):
+    db = get_clusters_db()
+    for cid, cdata in db.items():
+        if plugin_id in cdata["members"]:
+            cdata["members"].remove(plugin_id)
+    save_clusters_db(db)
+    return {"status": "success", "message": "Server aus Cluster isoliert."}
 
 # ==========================================
 # HILFSFUNKTIONEN (Helper)
@@ -79,13 +185,11 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
 
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
 
-    # Der Ziel-Ordner für die .pak Dateien (ConanSandbox/Mods)
     real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, mods_meta["file_path"])
     mods_dir = os.path.dirname(real_modlist_path)
     os.makedirs(mods_dir, exist_ok=True)
-    
-    # 1. ALTLASTEN BESEITIGEN: Vorher den Mods-Ordner sauber wischen, 
-    # damit keine verwaisten Hardlinks alte/umbenannte Mods blockieren!
+
+    # 1. ALTLASTEN BESEITIGEN
     try:
         for f in os.listdir(mods_dir):
             if f.lower().endswith(".pak"):
@@ -93,7 +197,6 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
     except: pass
 
     workshop_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id, "steamapps", "workshop", "content", str(mods_meta["steam_workshop_appid"])))
-
     valid_mod_lines = []
 
     for mod in current_mods:
@@ -101,33 +204,143 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
         mod_folder = os.path.join(workshop_dir, str(mod_id))
         pak_path = None
         pak_filename = None
-        
-        # 2. SUCHE: Finde die echte .pak Datei im Steam-Ordner
+
+        # 2. SUCHE DIE ECHTE DATEI FÜR UE5 HARDLINK
         if os.path.exists(mod_folder):
             for root, _, files in os.walk(mod_folder):
                 for file in files:
                     if file.lower().endswith(".pak"):
                         pak_path = os.path.abspath(os.path.join(root, file))
-                        pak_filename = file  # ZWINGEND: Der originale Dateiname für UE5!
+                        pak_filename = file
                         break
                 if pak_path: break
-                
-        # 3. LINKEN & EINTRAGEN
+
+        # 3. VERKNÜPFEN
         if pak_path and pak_filename:
             target_pak = os.path.join(mods_dir, pak_filename)
-            try:
-                # Der "Jedi-Trick": Hardlink erstellt eine 1:1 Spiegelung mit 0 Byte Speicherverbrauch!
-                os.link(pak_path, target_pak)
-            except OSError:
-                # Nur absoluter Notfall-Fallback, falls das Dateisystem netzwerkübergreifende Links verbietet
-                shutil.copy2(pak_path, target_pak)
-                
-            # Für UE5 Enhanced: Ausschließlich den Dateinamen mit Sternchen nutzen! Kein absoluter Pfad!
+            try: os.link(pak_path, target_pak)
+            except OSError: shutil.copy2(pak_path, target_pak)
             valid_mod_lines.append(f"*{pak_filename}\n")
 
-    # 4. MODLIST SPEICHERN
     with open(real_modlist_path, "w", encoding="utf-8") as f:
         f.writelines(valid_mod_lines)
+
+
+# ==========================================
+# CLUSTER MANAGEMENT (ARK, etc.)
+# ==========================================
+def get_clusters_db():
+    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
+    if os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: pass
+    return {}
+
+def save_clusters_db(data):
+    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
+    with open(db_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+@router.get("/clusters")
+def get_clusters():
+    return get_clusters_db()
+
+@router.post("/clusters/create")
+def create_cluster(payload: dict = Body(...)):
+    cluster_id = payload.get("cluster_id")
+    name = payload.get("name", "Neuer Cluster")
+    if not cluster_id: return {"status": "error", "message": "Keine Cluster-ID angegeben."}
+
+    db = get_clusters_db()
+    if cluster_id in db: return {"status": "error", "message": "Cluster-ID existiert bereits."}
+
+    # Der neutrale Ordner für Charakter-Transfers
+    shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
+    os.makedirs(shared_dir, exist_ok=True)
+
+    db[cluster_id] = {
+        "name": name,
+        "shared_dir": shared_dir,
+        "members": []
+    }
+    save_clusters_db(db)
+    return {"status": "success", "message": f"Cluster '{name}' erstellt!"}
+
+@router.post("/clusters/assign/{cluster_id}/{plugin_id}")
+def assign_to_cluster(cluster_id: str, plugin_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    # 1. Server sicherheitshalber aus allen anderen Clustern entfernen
+    for cid, cdata in db.items():
+        if plugin_id in cdata["members"]:
+            cdata["members"].remove(plugin_id)
+
+    # 2. PORT-KOLLISIONS-PRÜFUNG (Anti-Crash)
+    manifest = ConfigManager.load_manifest(plugin_id)
+    if manifest and "config_meta" in manifest:
+        desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+        new_desired = {}
+        if os.path.exists(desired_path):
+            try:
+                with open(desired_path, "r", encoding="utf-8") as f: new_desired = json.load(f)
+            except: pass
+
+        # Sammle alle bereits belegten Ports der ANDEREN Server in diesem Cluster
+        used_ports = set()
+        for member in db[cluster_id]["members"]:
+            m_desired_path = os.path.join(DATA_ROOT, member, "desired_config.json")
+            if os.path.exists(m_desired_path):
+                try:
+                    with open(m_desired_path, "r", encoding="utf-8") as f:
+                        m_data = json.load(f)
+                        for k, v in m_data.items():
+                            if "port" in k.lower():
+                                try: used_ports.add(int(v))
+                                except: pass
+                except: pass
+
+        # Prüfe und passe die Ports des NEUEN Servers an
+        updated_ports = False
+        for field in manifest["config_meta"].get("fields", []):
+            key = field["key"]
+            if "port" in key.lower():
+                # Hole aktuellen oder Standard-Port
+                current_port = int(new_desired.get(key, field.get("default", 0)))
+                original_port = current_port
+
+                # Solange der Port belegt ist, rechne +2 drauf (typisch für Unreal Engine)
+                while current_port in used_ports:
+                    current_port += 2
+
+                if current_port != original_port:
+                    new_desired[key] = current_port
+                    used_ports.add(current_port)
+                    updated_ports = True
+
+        # Wenn Ports geändert wurden, speichern und live Config anwenden
+        if updated_ports:
+            logger.info(f"[*] Port-Konflikt in Cluster '{cluster_id}' gelöst! Neue Ports für {plugin_id} gespeichert.")
+            os.makedirs(os.path.dirname(desired_path), exist_ok=True)
+            with open(desired_path, "w", encoding="utf-8") as f: json.dump(new_desired, f, indent=2)
+            ConfigManager.apply_desired_config(plugin_id)
+
+    # 3. Server final dem Cluster hinzufügen
+    db[cluster_id]["members"].append(plugin_id)
+    save_clusters_db(db)
+
+    return {"status": "success", "message": f"Server zum Cluster hinzugefügt (Ports automatisch abgeglichen)."}
+
+@router.post("/clusters/remove/{plugin_id}")
+def remove_from_cluster(plugin_id: str):
+    db = get_clusters_db()
+    for cid, cdata in db.items():
+        if plugin_id in cdata["members"]:
+            cdata["members"].remove(plugin_id)
+    save_clusters_db(db)
+    return {"status": "success", "message": "Server aus Cluster isoliert."}
 
 
 # ==========================================
@@ -194,7 +407,7 @@ def system_service_status_api():
     wd_active = False
     try: wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
     except: pass
-    
+
     try:
         proc = psutil.Process(os.getpid())
         ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
@@ -273,7 +486,7 @@ def get_installed_plugins():
                         hostname_key = next((f["key"] for f in meta.get("fields", []) if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                         if hostname_key and live_values.get(hostname_key):
                             server_name = live_values.get(hostname_key)
-                    
+
                     status = "online" if server_manager.is_server_online(plugin_id) else "offline"
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
                     installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status})
@@ -294,22 +507,21 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', server_name).strip('_').lower()
     if not safe_name: safe_name = "server"
     instance_id = f"{plugin_id}_{safe_name}"
-    
-    if os.path.exists(os.path.join(PLUGINS_ROOT, instance_id)): 
+
+    if os.path.exists(os.path.join(PLUGINS_ROOT, instance_id)):
         return {"status": "error", "message": "Server-ID existiert bereits!"}
-        
+
     instance_dir = os.path.join(PLUGINS_ROOT, instance_id)
     os.makedirs(instance_dir, exist_ok=True)
-    
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url, follow_redirects=True, timeout=15.0)
-            if response.status_code != 200: 
+            if response.status_code != 200:
                 return {"status": "error", "message": "Download fehlgeschlagen."}
-            
-            # YAML Unterstützung (Ohne ZIP Entpacken)
+
             if url.lower().endswith(".zip") or "zip" in response.headers.get("Content-Disposition", "") or response.content[:4] == b"PK\x03\x04":
-                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref: 
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
                     zip_ref.extractall(instance_dir)
             else:
                 manifest_path = os.path.join(instance_dir, "manifest.yaml")
@@ -320,6 +532,10 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
         if os.path.exists(manifest_path):
             with open(manifest_path, "r", encoding="utf-8") as f: manifest = yaml.safe_load(f)
             manifest["id"] = instance_id
+
+            # SPEICHERN DER CLOUD-URL FÜR UPDATES
+            manifest["source_url"] = url if not url.endswith(".zip") else ""
+
             with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
             meta = manifest.get("config_meta")
             if meta:
@@ -329,7 +545,7 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
                     os.makedirs(desired_dir, exist_ok=True)
                     with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
                         json.dump({hostname_key: server_name}, df, indent=2)
-                        
+
         return {"status": "success", "message": f"Server '{server_name}' erstellt.", "instance_id": instance_id}
     except Exception as e:
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
@@ -341,15 +557,15 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
 # ==========================================
 @router.post("/server/install/{plugin_id}")
 def install_server(plugin_id: str, req: InstallRequest = None):
+    # 1. NEU: Ziehe VOR dem Update das neueste YAML aus der Cloud!
+    ConfigManager.sync_manifest_from_cloud(plugin_id)
+
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
-    
+
     logger.info(f"[*] Update-Prozess für '{plugin_id}' gestartet...")
     res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-    
-    # ----------------------------------------------------
-    # MOD-TRACKER FÜR INSTALLATION
-    # ----------------------------------------------------
+
     mods_meta = manifest.get("mods_meta", {})
     if mods_meta and "steam_workshop_appid" in mods_meta:
         mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
@@ -357,16 +573,8 @@ def install_server(plugin_id: str, req: InstallRequest = None):
             with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
             if current_mods:
                 steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
-            else:
-                logger.info(f"[Mod-Tracker] mods_db.json ist leer.")
-        else:
-            logger.info(f"[Mod-Tracker] Keine mods_db.json gefunden.")
-    else:
-        logger.warning(f"[Mod-Tracker] Keine 'steam_workshop_appid' im Manifest!")
-    # ----------------------------------------------------
-                
-    rebuild_modlist(plugin_id, manifest)
 
+    rebuild_modlist(plugin_id, manifest)
     if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
     return res
 
@@ -412,10 +620,7 @@ def start(plugin_id: str):
     if auto_update in [True, "True", "true", 1]:
         logger.info("[*] Auto-Update ist an! Synchronisiere Daten vor dem Start...")
         steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-        
-        # ----------------------------------------------------
-        # MOD-TRACKER FÜR START
-        # ----------------------------------------------------
+
         mods_meta = manifest.get("mods_meta", {})
         if mods_meta and "steam_workshop_appid" in mods_meta:
             mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
@@ -423,18 +628,35 @@ def start(plugin_id: str):
                 with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
                 if current_mods:
                     steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
-        # ----------------------------------------------------
 
         if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
-        
+
     rebuild_modlist(plugin_id, manifest)
     ConfigManager.apply_desired_config(plugin_id)
-    
-    executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
-    return server_manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
+
+    if platform.system() == "Linux" and "executable_linux" in manifest:
+        executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_linux"))
+    else:
+        executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
+
+    args = manifest.get("default_args", []).copy()
+
+    # === DYNAMISCHE CLUSTER INJECTION ===
+    db = get_clusters_db()
+    for cluster_id, cdata in db.items():
+        if plugin_id in cdata.get("members", []):
+            shared_dir = cdata.get("shared_dir")
+            os.makedirs(shared_dir, exist_ok=True)
+            logger.info(f"[*] Cluster erkannt! Injiziere Cluster-Daten für '{cluster_id}'...")
+            args.append(f"-clusterid={cluster_id}")
+            args.append(f"-ClusterDirOverride=\"{shared_dir}\"")
+            args.append("-NoTransferFromFiltering")
+            break
+
+    return server_manager.start_server(plugin_id, executable_path, args)
 
 @router.post("/server/stop/{plugin_id}")
-def stop(plugin_id: str): 
+def stop(plugin_id: str):
     return server_manager.stop_server(plugin_id)
 
 @router.get("/server/stats/{plugin_id}")
@@ -508,12 +730,12 @@ async def add_server_mod(plugin_id: str, mod_id: str):
     if os.path.exists(mods_file):
         with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     if any(m["id"] == mod_id for m in current_mods): return {"status": "error", "message": "Mod existiert bereits!"}
-    
+
     current_mods.append({"id": mod_id, "name": mod_name, "version": mod_version})
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-    
+
     rebuild_modlist(plugin_id, manifest)
-    
+
     return {"status": "success", "message": f"Mod '{mod_name}' zur Liste hinzugefügt. Bitte klicke nun auf 'Install / Update', um sie herunterzuladen!"}
 
 @router.delete("/server/mods/delete/{plugin_id}/{mod_id}")
@@ -522,13 +744,13 @@ def delete_server_mod(plugin_id: str, mod_id: str):
     if not manifest or "mods_meta" not in manifest: return {"status": "error", "message": "Manifest fehlt oder kein Modding unterstützt"}
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     if not os.path.exists(mods_file): return {"status": "success"}
-    
+
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     current_mods = [m for m in current_mods if m["id"] != mod_id]
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-    
+
     rebuild_modlist(plugin_id, manifest)
-    
+
     return {"status": "success", "message": "Mod entfernt."}
 
 @router.delete("/server/delete/{plugin_id}")
