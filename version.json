@@ -1,5 +1,33 @@
 [
   {
+  "version": "v0.1.7.0",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Mods bei SteamCMD zu Hardlinks anstatt langen pfaden"
+  ]
+  },
+  {
+  "version": "v0.1.6.9",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Fehler in Server_manager.py"
+  ]
+  },
+  {
+  "version": "v0.1.6.8",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Formatierungs anpassung wegen Boot schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.7",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Icon und Buidl Prozess Anpassung"
+  ]
+  },
+  {
   "version": "v0.1.6.6",
   "build_date": "2026-06-26",
   "changelog": [
