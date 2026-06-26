@@ -1,21 +1,35 @@
 [
   {
+  "version": "v0.1.6.5",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: LOOP beim Laden"
+  ]
+  },
+  {
+  "version": "v0.1.6.4",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Ghost Processe bei Update"
+  ]
+  },
+  {
   "version": "v0.1.6.3",
-  "build_date": "2026-06-25",
+  "build_date": "2026-06-26",
   "changelog": [
     "NEU: weitere Erweiterung der Rückmeldung von Workshop mod install schleife"
   ]
   },
   {
   "version": "v0.1.6.2",
-  "build_date": "2026-06-25",
+  "build_date": "2026-06-26",
   "changelog": [
     "NEU: Mehr Rückmeldung von Workshop mod install schleife"
   ]
   },
   {
   "version": "v0.1.6.1",
-  "build_date": "2026-06-25",
+  "build_date": "2026-06-26",
   "changelog": [
     "NEU: YAML anstatt ZIP Plugins",
     "FIX: Workshop Mods"
