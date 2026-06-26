@@ -69,13 +69,3 @@ def get_current_system_version():
                     data["history"] = [data]; return data
         except: pass
     return {"version": "dev-build", "build_date": "unknown", "changelog": ["Lokale Entwicklungsversion."], "history": []}
-
-
-# ==========================================
-# MANAGER INITIALISIERUNG
-# ==========================================
-from core.steamcmd_manager import SteamCMDManager
-from core.backup_manager import BackupManager
-
-steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
-backup_manager = BackupManager(base_dir=EXE_DIR)
