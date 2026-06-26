@@ -82,30 +82,30 @@ class SteamCMDManager:
             return {"status": "error", "message": f"SteamCMD Fehler: {e}"}
 
     def update_workshop_mods(self, plugin_id: str, workshop_appid: str, mod_ids: list):
-            import platform, subprocess, os
-            from core.env import logger
-
-            if not mod_ids:
-                return
-
-            install_dir = os.path.abspath(os.path.join(self.base_dir, plugin_id))
-            is_windows = platform.system() == "Windows"
-            exe_path = os.path.join(self.base_dir, "steamcmd", "steamcmd.exe" if is_windows else "steamcmd.sh")
-
-            if not os.path.exists(exe_path):
-                logger.error("[SteamCMD] Fehler: SteamCMD nicht gefunden für Mod-Download!")
-                return
-
-            # Wir ketten alle Mods in EINEN einzigen SteamCMD Aufruf! (Spart enorm viel Zeit)
-            cmd = [exe_path, "+force_install_dir", install_dir, "+login", "anonymous"]
-            for mod_id in mod_ids:
-                cmd.extend(["+workshop_download_item", str(workshop_appid), str(mod_id), "validate"])
-            cmd.append("+quit")
-
-            flags = subprocess.CREATE_NO_WINDOW if is_windows else 0
-            try:
-                logger.info(f"[SteamCMD] Starte Download/Update für {len(mod_ids)} Mods...")
-                subprocess.run(cmd, creationflags=flags, check=True)
-                logger.info("[SteamCMD] Mod-Updates erfolgreich abgeschlossen!")
-            except Exception as e:
-                logger.error(f"[SteamCMD] Mod-Download fehlgeschlagen: {e}")
+        import platform, subprocess, os
+        from core.env import logger
+        
+        if not mod_ids: 
+            return
+            
+        install_dir = os.path.abspath(os.path.join(self.base_dir, plugin_id))
+        is_windows = platform.system() == "Windows"
+        exe_path = os.path.join(self.base_dir, "steamcmd", "steamcmd.exe" if is_windows else "steamcmd.sh")
+        
+        if not os.path.exists(exe_path):
+            logger.error("[SteamCMD] Fehler: SteamCMD nicht gefunden für Mod-Download!")
+            return
+            
+        logger.info(f"[SteamCMD] Bereite massiven Download von {len(mod_ids)} Workshop-Mods für Engine {workshop_appid} vor...")
+        cmd = [exe_path, "+force_install_dir", install_dir, "+login", "anonymous"]
+        for mod_id in mod_ids:
+            cmd.extend(["+workshop_download_item", str(workshop_appid), str(mod_id), "validate"])
+        cmd.append("+quit")
+        
+        flags = subprocess.CREATE_NO_WINDOW if is_windows else 0
+        try:
+            logger.info(f"[SteamCMD] Mod-Download läuft. Bitte warten...")
+            subprocess.run(cmd, creationflags=flags, check=True)
+            logger.info("[SteamCMD] Alle Mods erfolgreich validiert und heruntergeladen!")
+        except Exception as e:
+            logger.error(f"[SteamCMD] Mod-Download fehlgeschlagen: {e}")
