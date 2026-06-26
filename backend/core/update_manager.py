@@ -109,21 +109,31 @@ class UpdateManager:
                         f.write("@echo off\n")
                         f.write("echo [EmberCore Updater] Warte auf Beendigung des Hauptprozesses...\n")
                         f.write("timeout /t 2 /nobreak > nul\n")
-                        if "--service" in sys.argv:
-                            f.write("echo [EmberCore Updater] Stoppe Windows Service...\n")
-                            f.write("sc stop EmberCore > nul 2>&1\n")
-                            f.write("timeout /t 5 /nobreak > nul\n")
-                        f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
+                        
+                        f.write("echo [EmberCore Updater] Beende Dienste und blockierende Prozesse...\n")
+                        f.write("net stop EmberCore > nul 2>&1\n")
+                        f.write("sc stop EmberCore > nul 2>&1\n")
                         f.write("timeout /t 2 /nobreak > nul\n")
+                        
+                        # FIX: Aggressiver Tree-Kill für ALLE EmberCore Prozesse (Zombies!)
+                        f.write("echo [EmberCore Updater] Raeume Zombie-Prozesse ab...\n")
+                        f.write("taskkill /F /T /IM EmberCore.exe > nul 2>&1\n")
+                        f.write("taskkill /F /T /IM EmberCoreService.exe > nul 2>&1\n")
+                        f.write(f"taskkill /F /T /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
+                        f.write("timeout /t 3 /nobreak > nul\n")
+                        
                         f.write("echo [EmberCore Updater] Entpacke neues Update...\n")
                         f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\" > nul 2>&1\n")
                         f.write(f"del /f /q \"{archive_path}\"\n")
+                        
                         f.write("echo [EmberCore Updater] Starte System neu...\n")
                         if "--service" in sys.argv:
                             f.write(f"sc start EmberCore > nul 2>&1\n")
                         else:
                             f.write(f"start \"\" \"{current_exe_path}\" {' '.join(sys.argv[1:])}\n")
                         f.write("del \"%~f0\"\n")
+                    
+                    # Batch-Datei komplett losgelöst vom Hauptprozess starten
                     subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0)
 
                 async def kill_switch():
