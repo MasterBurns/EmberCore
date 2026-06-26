@@ -274,17 +274,16 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
     os.makedirs(instance_dir, exist_ok=True)
     
     try:
-        # YAML und ZIP Support!
         async with httpx.AsyncClient() as client:
             response = await client.get(url, follow_redirects=True, timeout=15.0)
             if response.status_code != 200: 
                 return {"status": "error", "message": "Download fehlgeschlagen."}
             
+            # YAML Unterstützung (Ohne ZIP Entpacken)
             if url.lower().endswith(".zip") or "zip" in response.headers.get("Content-Disposition", "") or response.content[:4] == b"PK\x03\x04":
                 with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref: 
                     zip_ref.extractall(instance_dir)
             else:
-                # Es ist eine direkte YAML-Datei
                 manifest_path = os.path.join(instance_dir, "manifest.yaml")
                 with open(manifest_path, "wb") as f:
                     f.write(response.content)
@@ -320,21 +319,23 @@ def install_server(plugin_id: str, req: InstallRequest = None):
     logger.info(f"[*] Update-Prozess für '{plugin_id}' gestartet...")
     res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
     
+    # ----------------------------------------------------
+    # MOD-TRACKER FÜR INSTALLATION
+    # ----------------------------------------------------
     mods_meta = manifest.get("mods_meta", {})
     if mods_meta and "steam_workshop_appid" in mods_meta:
-        logger.info(f"[*] Mods aktiviert! Steam Workshop Engine ID: {mods_meta['steam_workshop_appid']}")
         mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
         if os.path.exists(mods_file):
             with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
-            mod_ids = [m["id"] for m in current_mods]
-            if mod_ids:
-                steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), mod_ids)
+            if current_mods:
+                steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
             else:
-                logger.info("[-] Keine Mods in der Datenbank gefunden.")
+                logger.info(f"[Mod-Tracker] mods_db.json ist leer.")
         else:
-            logger.info("[-] Keine mods_db.json vorhanden. Überspringe Mod-Download.")
+            logger.info(f"[Mod-Tracker] Keine mods_db.json gefunden.")
     else:
-        logger.warning(f"[!] Manifest von '{plugin_id}' enthält KEINE 'steam_workshop_appid'. Mod-Download wird übersprungen!")
+        logger.warning(f"[Mod-Tracker] Keine 'steam_workshop_appid' im Manifest!")
+    # ----------------------------------------------------
                 
     rebuild_modlist(plugin_id, manifest)
 
@@ -384,14 +385,17 @@ def start(plugin_id: str):
         logger.info("[*] Auto-Update ist an! Synchronisiere Daten vor dem Start...")
         steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
         
+        # ----------------------------------------------------
+        # MOD-TRACKER FÜR START
+        # ----------------------------------------------------
         mods_meta = manifest.get("mods_meta", {})
         if mods_meta and "steam_workshop_appid" in mods_meta:
             mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
             if os.path.exists(mods_file):
                 with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
-                mod_ids = [m["id"] for m in current_mods]
-                if mod_ids:
-                    steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), mod_ids)
+                if current_mods:
+                    steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
+        # ----------------------------------------------------
 
         if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
         
