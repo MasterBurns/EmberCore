@@ -17,7 +17,9 @@ router = APIRouter(prefix="/api")
 
 class InstallRequest(BaseModel): install_dir_name: str = None
 
-# --- DISK TREND HELPER ---
+# ==========================================
+# HILFSFUNKTIONEN (Helper)
+# ==========================================
 def calculate_disk_trend(plugin_id: str):
     now = datetime.now()
     if plugin_id in disk_cache:
@@ -61,8 +63,48 @@ def calculate_disk_trend(plugin_id: str):
     disk_cache[plugin_id] = (res, now)
     return res
 
+def rebuild_modlist(plugin_id: str, manifest: dict):
+    mods_meta = manifest.get("mods_meta", {})
+    if not mods_meta or "steam_workshop_appid" not in mods_meta: return
 
-# --- SYSTEM & SERVICE ---
+    mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+    if not os.path.exists(mods_file): return
+
+    with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
+
+    real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, mods_meta["file_path"])
+    os.makedirs(os.path.dirname(real_modlist_path), exist_ok=True)
+    workshop_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id, "steamapps", "workshop", "content", str(mods_meta["steam_workshop_appid"])))
+
+    valid_mod_lines = []
+
+    for mod in current_mods:
+        mod_id = mod["id"]
+        mod_folder = os.path.join(workshop_dir, str(mod_id))
+        pak_path = None
+        
+        # Durchsuche den Ordner nach der echten .pak Datei (Ignoriere den Dateinamen)
+        if os.path.exists(mod_folder):
+            for root, _, files in os.walk(mod_folder):
+                for file in files:
+                    if file.lower().endswith(".pak"):
+                        pak_path = os.path.abspath(os.path.join(root, file)).replace("\\", "/")
+                        break
+                if pak_path: break
+                
+        if pak_path:
+            valid_mod_lines.append(f"*{pak_path}\n")
+        else:
+            fallback_path = f"{SERVERS_ROOT}/{plugin_id}/steamapps/workshop/content/{mods_meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak".replace("\\", "/")
+            valid_mod_lines.append(f"*{fallback_path}\n")
+
+    with open(real_modlist_path, "w", encoding="utf-8") as f:
+        f.writelines(valid_mod_lines)
+
+
+# ==========================================
+# SYSTEM & SERVICE ROUTEN
+# ==========================================
 @router.get("/system/health")
 def system_health():
     return {"status": "ok"}
@@ -79,7 +121,6 @@ def save_sys_settings_api(data: dict = Body(...)):
     is_verbose = sys_config.get("verbose_logging")
     logger.setLevel(logging.DEBUG if is_verbose else logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.INFO if is_verbose else logging.WARNING)
-    logger.info(f"System-Settings gespeichert. Verbose Logging: {is_verbose}")
     return {"status": "success"}
 
 @router.get("/system/logs")
@@ -125,7 +166,7 @@ def system_service_status_api():
     wd_active = False
     try: wd_active = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
     except: pass
-
+    
     try:
         proc = psutil.Process(os.getpid())
         ember_ram = round(proc.memory_info().rss / (1024*1024), 2)
@@ -161,7 +202,6 @@ def get_system_version_api(): return get_current_system_version()
 @router.get("/system/check-update")
 async def check_system_update_api():
     from core.update_manager import update_manager
-    # Fallback to local script if update_manager doesn't have it
     if hasattr(update_manager, 'check_system_update'):
         return await update_manager.check_system_update(get_current_system_version()["version"])
     else: return {"update_available": False}
@@ -173,7 +213,10 @@ async def update_embercore_api():
         return await update_manager.process_update()
     else: return {"status": "error", "message": "Update Manager nicht vollständig."}
 
-# --- PLUGINS & MARKETPLACE ---
+
+# ==========================================
+# PLUGINS & MARKETPLACE ROUTEN
+# ==========================================
 @router.get("/plugins/installed")
 def get_installed_plugins():
     dirs_to_scan = [(DEV_PLUGINS_ROOT, True), (PLUGINS_ROOT, False)]
@@ -202,7 +245,7 @@ def get_installed_plugins():
                         hostname_key = next((f["key"] for f in meta.get("fields", []) if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                         if hostname_key and live_values.get(hostname_key):
                             server_name = live_values.get(hostname_key)
-
+                    
                     status = "online" if server_manager.is_server_online(plugin_id) else "offline"
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
                     installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status})
@@ -223,19 +266,34 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', server_name).strip('_').lower()
     if not safe_name: safe_name = "server"
     instance_id = f"{plugin_id}_{safe_name}"
-    if os.path.exists(os.path.join(PLUGINS_ROOT, instance_id)): return {"status": "error", "message": "Server-ID existiert bereits!"}
+    
+    if os.path.exists(os.path.join(PLUGINS_ROOT, instance_id)): 
+        return {"status": "error", "message": "Server-ID existiert bereits!"}
+        
     instance_dir = os.path.join(PLUGINS_ROOT, instance_id)
     os.makedirs(instance_dir, exist_ok=True)
+    
     try:
+        # Erkennt automatisch, ob ZIP oder rohe YAML heruntergeladen wird!
         async with httpx.AsyncClient() as client:
             response = await client.get(url, follow_redirects=True, timeout=15.0)
-            if response.status_code != 200: return {"status": "error", "message": "Download fehlgeschlagen."}
-            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref: zip_ref.extractall(instance_dir)
+            if response.status_code != 200: 
+                return {"status": "error", "message": "Download fehlgeschlagen."}
+            
+            if url.lower().endswith(".zip") or "zip" in response.headers.get("Content-Disposition", "") or response.content[:4] == b"PK\x03\x04":
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref: 
+                    zip_ref.extractall(instance_dir)
+            else:
+                # Es ist eine direkte YAML-Datei
+                manifest_path = os.path.join(instance_dir, "manifest.yaml")
+                with open(manifest_path, "wb") as f:
+                    f.write(response.content)
+
         manifest_path = os.path.join(instance_dir, "manifest.yaml")
         if os.path.exists(manifest_path):
             with open(manifest_path, "r", encoding="utf-8") as f: manifest = yaml.safe_load(f)
             manifest["id"] = instance_id
-            with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest, f, allow_unicode=True)
+            with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
             meta = manifest.get("config_meta")
             if meta:
                 hostname_key = next((f["key"] for f in meta.get("fields", []) if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
@@ -244,31 +302,36 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
                     os.makedirs(desired_dir, exist_ok=True)
                     with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
                         json.dump({hostname_key: server_name}, df, indent=2)
+                        
         return {"status": "success", "message": f"Server '{server_name}' erstellt.", "instance_id": instance_id}
     except Exception as e:
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
         return {"status": "error", "message": str(e)}
 
-# --- SERVER VERWALTUNG ---
+
+# ==========================================
+# SERVER VERWALTUNG ROUTEN
+# ==========================================
 @router.post("/server/install/{plugin_id}")
 def install_server(plugin_id: str, req: InstallRequest = None):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
-
-    # 1. Haupt-Spiel aktualisieren
+    
     res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-
-    # 2. NEU: Workshop Mods aktualisieren
+    
     mods_meta = manifest.get("mods_meta", {})
-    if mods_meta.get("download_via_steamcmd"):
+    if mods_meta and "steam_workshop_appid" in mods_meta:
         mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
         if os.path.exists(mods_file):
             with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
             mod_ids = [m["id"] for m in current_mods]
             if mod_ids:
                 steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), mod_ids)
+                
+    rebuild_modlist(plugin_id, manifest)
 
     if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
+    return res
 
 @router.post("/server/check-updates/{plugin_id}")
 async def force_check_game_updates(plugin_id: str):
@@ -310,28 +373,27 @@ def start(plugin_id: str):
             auto_update = json.load(df).get("AutoUpdateOnStart")
 
     if auto_update in [True, "True", "true", 1]:
-        # 1. Spiel Auto-Update
         steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-
-        # 2. NEU: Mod Auto-Update
+        
         mods_meta = manifest.get("mods_meta", {})
-        if mods_meta.get("download_via_steamcmd"):
+        if mods_meta and "steam_workshop_appid" in mods_meta:
             mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
             if os.path.exists(mods_file):
                 with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
                 mod_ids = [m["id"] for m in current_mods]
                 if mod_ids:
-                    logger.info(f"Auto-Update: Prüfe und lade {len(mod_ids)} Workshop-Mods...")
                     steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), mod_ids)
 
         if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
-
+        
+    rebuild_modlist(plugin_id, manifest)
     ConfigManager.apply_desired_config(plugin_id)
+    
     executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
     return server_manager.start_server(plugin_id, executable_path, manifest.get("default_args", []))
 
 @router.post("/server/stop/{plugin_id}")
-def stop(plugin_id: str):
+def stop(plugin_id: str): 
     return server_manager.stop_server(plugin_id)
 
 @router.get("/server/stats/{plugin_id}")
@@ -405,14 +467,13 @@ async def add_server_mod(plugin_id: str, mod_id: str):
     if os.path.exists(mods_file):
         with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     if any(m["id"] == mod_id for m in current_mods): return {"status": "error", "message": "Mod existiert bereits!"}
+    
     current_mods.append({"id": mod_id, "name": mod_name, "version": mod_version})
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-    meta = manifest["mods_meta"]
-    real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, meta["file_path"])
-    os.makedirs(os.path.dirname(real_modlist_path), exist_ok=True)
-    mod_line = f"*{SERVERS_ROOT}/{plugin_id}/steamapps/workshop/content/{meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak\n"
-    with open(real_modlist_path, "a", encoding="utf-8") as f: f.write(mod_line)
-    return {"status": "success", "message": f"Mod '{mod_name}' hinzugefügt."}
+    
+    rebuild_modlist(plugin_id, manifest)
+    
+    return {"status": "success", "message": f"Mod '{mod_name}' zur Liste hinzugefügt. Bitte klicke nun auf 'Install / Update', um sie herunterzuladen!"}
 
 @router.delete("/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
@@ -420,15 +481,13 @@ def delete_server_mod(plugin_id: str, mod_id: str):
     if not manifest or "mods_meta" not in manifest: return {"status": "error", "message": "Manifest fehlt oder kein Modding unterstützt"}
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     if not os.path.exists(mods_file): return {"status": "success"}
+    
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
     current_mods = [m for m in current_mods if m["id"] != mod_id]
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
-    meta = manifest["mods_meta"]
-    real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, meta["file_path"])
-    if os.path.exists(real_modlist_path):
-        with open(real_modlist_path, "r", encoding="utf-8") as f: lines = f.readlines()
-        lines = [line for line in lines if f"/{mod_id}/" not in line]
-        with open(real_modlist_path, "w", encoding="utf-8") as f: f.writelines(lines)
+    
+    rebuild_modlist(plugin_id, manifest)
+    
     return {"status": "success", "message": "Mod entfernt."}
 
 @router.delete("/server/delete/{plugin_id}")
