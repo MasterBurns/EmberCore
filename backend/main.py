@@ -1,5 +1,15 @@
 import sys, os, subprocess, platform
 
+#Pyinstaller IMports
+try:
+    import core.steamcmd_manager
+    import core.backup_manager
+    import core.update_manager
+    import core.managers
+    import api.router
+except ImportError:
+    pass
+
 # ==========================================
 # WATCHDOG (Fängt Windows-Fenster Schließungen ab)
 # Wichtig: Muss ganz oben stehen!
