@@ -1,0 +1,79 @@
+name: "ARK: Survival Ascended"
+engine: "steamcmd"
+steam_app_id: 2430930
+
+# Start-Dateien
+executable_windows: "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
+executable_linux: "ShooterGame/Binaries/Linux/ArkAscendedServer" 
+
+# Standard-Startparameter für ASA
+# TheIsland_WP ist die Standard-Map. Wir aktivieren direkt RCON für den sauberen EmberCore-Shutdown.
+default_args:
+  - "TheIsland_WP?listen?SessionName=EmberCore_ASA?Port=7777?QueryPort=27015?MaxPlayers=20?RCONEnabled=True?RCONPort=27020?ServerAdminPassword=EmberCoreRcon"
+  - "-server"
+  - "-log"
+  - "-clusterid={{CLUSTER_ID}}"
+  - "-ClusterDirOverride={{CLUSTER_SHARED_DIR}}"
+  - "-NoTransferFromFiltering"
+  - "-NoBattlEye"
+  - "-automanagedmods"
+
+# Automatisierte Firewall & Portfreigaben (Windows)
+network_meta:
+  ports:
+    - port: 7777
+      protocol: "udp"
+      desc: "Game Port"
+    - port: 27015
+      protocol: "udp"
+      desc: "Steam Query Port"
+    - port: 27020
+      protocol: "tcp"
+      desc: "RCON Port (EmberCore Shutdown)"
+
+# Der sanfte 3-Stufen-Exit via RCON (ARK nutzt "DoExit")
+shutdown:
+  rcon:
+    command: "DoExit"
+    port: 27020
+    default_password: "EmberCoreRcon"
+    config_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
+    password_key: "ServerAdminPassword"
+    port_key: "RCONPort"
+
+# Backup-Pfade
+backup:
+  source_path: "ShooterGame/Saved"
+  
+# Live-Konfiguration über das EmberCore Web-Dashboard
+config_meta:
+  file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
+  fields:
+    - key: "SessionName"
+      label: "Server Name"
+      type: "text"
+      default: "EmberCore ASA Server"
+      
+    - key: "ServerPassword"
+      label: "Server Passwort (Leer = Öffentlich)"
+      type: "text"
+      default: ""
+      
+    - key: "ServerAdminPassword"
+      label: "Admin/RCON Passwort"
+      type: "text"
+      default: "EmberCoreRcon"
+      
+    - key: "MaxPlayers"
+      label: "Maximale Spieler"
+      type: "number"
+      default: 20
+
+# Crash-Erkennung & Diagnostik
+diagnostics:
+  - pattern: "Failed to listen on Query Port"
+    message: "Port 27015 ist blockiert. Läuft bereits ein anderer Server auf diesem Port?"
+    action_type: "manual"
+  - pattern: "RCONServer failed to initialize"
+    message: "Der RCON-Port (27020) konnte nicht gestartet werden. Der sanfte Shutdown (Savegame) ist gefährdet!"
+    action_type: "manual"
