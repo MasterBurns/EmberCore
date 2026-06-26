@@ -274,7 +274,7 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
     os.makedirs(instance_dir, exist_ok=True)
     
     try:
-        # Erkennt automatisch, ob ZIP oder rohe YAML heruntergeladen wird!
+        # YAML und ZIP Support!
         async with httpx.AsyncClient() as client:
             response = await client.get(url, follow_redirects=True, timeout=15.0)
             if response.status_code != 200: 
@@ -317,16 +317,24 @@ def install_server(plugin_id: str, req: InstallRequest = None):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
     
+    logger.info(f"[*] Update-Prozess für '{plugin_id}' gestartet...")
     res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
     
     mods_meta = manifest.get("mods_meta", {})
     if mods_meta and "steam_workshop_appid" in mods_meta:
+        logger.info(f"[*] Mods aktiviert! Steam Workshop Engine ID: {mods_meta['steam_workshop_appid']}")
         mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
         if os.path.exists(mods_file):
             with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
             mod_ids = [m["id"] for m in current_mods]
             if mod_ids:
                 steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), mod_ids)
+            else:
+                logger.info("[-] Keine Mods in der Datenbank gefunden.")
+        else:
+            logger.info("[-] Keine mods_db.json vorhanden. Überspringe Mod-Download.")
+    else:
+        logger.warning(f"[!] Manifest von '{plugin_id}' enthält KEINE 'steam_workshop_appid'. Mod-Download wird übersprungen!")
                 
     rebuild_modlist(plugin_id, manifest)
 
@@ -373,6 +381,7 @@ def start(plugin_id: str):
             auto_update = json.load(df).get("AutoUpdateOnStart")
 
     if auto_update in [True, "True", "true", 1]:
+        logger.info("[*] Auto-Update ist an! Synchronisiere Daten vor dem Start...")
         steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
         
         mods_meta = manifest.get("mods_meta", {})
