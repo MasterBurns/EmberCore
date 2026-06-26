@@ -1,5 +1,27 @@
 [
   {
+  "version": "v0.1.6.3",
+  "build_date": "2026-06-25",
+  "changelog": [
+    "NEU: weitere Erweiterung der Rückmeldung von Workshop mod install schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.2",
+  "build_date": "2026-06-25",
+  "changelog": [
+    "NEU: Mehr Rückmeldung von Workshop mod install schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.1",
+  "build_date": "2026-06-25",
+  "changelog": [
+    "NEU: YAML anstatt ZIP Plugins",
+    "FIX: Workshop Mods"
+  ]
+  },
+  {
   "version": "v0.1.6",
   "build_date": "2026-06-25",
   "changelog": [
