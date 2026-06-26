@@ -54,12 +54,8 @@ from fastapi.staticfiles import StaticFiles
 
 # 1. Wir importieren unsere neuen sauberen Module
 import core.env as env
-from core.env import (
-    EXE_DIR, BASE_DIR, SERVERS_ROOT, DATA_ROOT, PLUGINS_ROOT, DEV_PLUGINS_ROOT,
-    BACKUPS_ROOT, START_TIME, sys_config, logger, game_update_cache, disk_cache,
-    get_current_system_version
-)
-from core.managers import steam_manager, backup_manager
+from core.env import ACTIVE_PORT, EXE_DIR, BASE_DIR, logger, sys_config
+from core.managers import backup_manager
 from core.scheduler import BackupScheduler
 
 # 2. Wir binden die aufgeteilten API-Routen ein
