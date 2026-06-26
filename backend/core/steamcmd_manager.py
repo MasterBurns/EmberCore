@@ -81,11 +81,11 @@ class SteamCMDManager:
         except Exception as e:
             return {"status": "error", "message": f"SteamCMD Fehler: {e}"}
 
-    def update_workshop_mods(self, plugin_id: str, workshop_appid: str, mod_ids: list):
+   def update_workshop_mods(self, plugin_id: str, workshop_appid: str, mods_info: list):
         import platform, subprocess, os
         from core.env import logger
         
-        if not mod_ids: 
+        if not mods_info: 
             return
             
         install_dir = os.path.abspath(os.path.join(self.base_dir, plugin_id))
@@ -96,16 +96,36 @@ class SteamCMDManager:
             logger.error("[SteamCMD] Fehler: SteamCMD nicht gefunden für Mod-Download!")
             return
             
-        logger.info(f"[SteamCMD] Bereite massiven Download von {len(mod_ids)} Workshop-Mods für Engine {workshop_appid} vor...")
+        # ====== DEIN GEWÜNSCHTER INFO BLOCK ======
+        print(f"\n{'#'*60}")
+        print(f"### MODS für \"{plugin_id.upper()}\" ###")
+        print(f"{'#'*60}")
+        print(f"Steam AppID: {workshop_appid}")
+        print(f"Status: Lade {len(mods_info)} Mods herunter...")
+        for m in mods_info:
+            print(f" - [{m.get('id', 'Unbekannt')}] {m.get('name', 'Ohne Namen')}")
+        print(f"{'#'*60}\n")
+        # =========================================
+        
         cmd = [exe_path, "+force_install_dir", install_dir, "+login", "anonymous"]
-        for mod_id in mod_ids:
-            cmd.extend(["+workshop_download_item", str(workshop_appid), str(mod_id), "validate"])
+        for m in mods_info:
+            cmd.extend(["+workshop_download_item", str(workshop_appid), str(m.get('id', ''))])
+            cmd.append("validate")
         cmd.append("+quit")
         
         flags = subprocess.CREATE_NO_WINDOW if is_windows else 0
         try:
-            logger.info(f"[SteamCMD] Mod-Download läuft. Bitte warten...")
-            subprocess.run(cmd, creationflags=flags, check=True)
-            logger.info("[SteamCMD] Alle Mods erfolgreich validiert und heruntergeladen!")
+            # Wir leiten die Ausgabe live in deine CMD um!
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                text=True, bufsize=1, creationflags=flags
+            )
+            for line in process.stdout:
+                line_clean = line.strip()
+                # Um Spam zu vermeiden, zeigen wir nur den Download-Status
+                if "Update state" in line_clean or "Success" in line_clean or "ERROR" in line_clean or "Downloading item" in line_clean:
+                    print(f"> {line_clean}")
+            process.wait()
+            print(f"\n[+] Alle Mods erfolgreich verarbeitet!\n{'#'*60}\n")
         except Exception as e:
             logger.error(f"[SteamCMD] Mod-Download fehlgeschlagen: {e}")
