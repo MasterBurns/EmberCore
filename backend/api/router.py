@@ -10,9 +10,15 @@ from core.env import (
     BACKUPS_ROOT, START_TIME, sys_config, logger, game_update_cache, disk_cache,
     get_current_system_version
 )
-from core.managers import steam_manager, backup_manager
 from core.server_manager import server_manager
 from core.config_manager import ConfigManager
+
+# === NEU: Manager hier direkt instanziieren (Bricht den PyInstaller-Kreis für immer!) ===
+from core.steamcmd_manager import SteamCMDManager
+from core.backup_manager import BackupManager
+steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
+backup_manager = BackupManager(base_dir=EXE_DIR)
+# =======================================================================================
 
 router = APIRouter(prefix="/api")
 
