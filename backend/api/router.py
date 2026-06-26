@@ -79,8 +79,19 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
 
     with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
 
+    # Der Ziel-Ordner für die .pak Dateien (ConanSandbox/Mods)
     real_modlist_path = os.path.join(SERVERS_ROOT, plugin_id, mods_meta["file_path"])
-    os.makedirs(os.path.dirname(real_modlist_path), exist_ok=True)
+    mods_dir = os.path.dirname(real_modlist_path)
+    os.makedirs(mods_dir, exist_ok=True)
+    
+    # 1. ALTLASTEN BESEITIGEN: Vorher den Mods-Ordner sauber wischen, 
+    # damit keine verwaisten Hardlinks alte/umbenannte Mods blockieren!
+    try:
+        for f in os.listdir(mods_dir):
+            if f.lower().endswith(".pak"):
+                os.remove(os.path.join(mods_dir, f))
+    except: pass
+
     workshop_dir = os.path.abspath(os.path.join(SERVERS_ROOT, plugin_id, "steamapps", "workshop", "content", str(mods_meta["steam_workshop_appid"])))
 
     valid_mod_lines = []
@@ -89,22 +100,32 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
         mod_id = mod["id"]
         mod_folder = os.path.join(workshop_dir, str(mod_id))
         pak_path = None
+        pak_filename = None
         
-        # Durchsuche den Ordner nach der echten .pak Datei (Ignoriere den Dateinamen)
+        # 2. SUCHE: Finde die echte .pak Datei im Steam-Ordner
         if os.path.exists(mod_folder):
             for root, _, files in os.walk(mod_folder):
                 for file in files:
                     if file.lower().endswith(".pak"):
-                        pak_path = os.path.abspath(os.path.join(root, file)).replace("\\", "/")
+                        pak_path = os.path.abspath(os.path.join(root, file))
+                        pak_filename = file  # ZWINGEND: Der originale Dateiname für UE5!
                         break
                 if pak_path: break
                 
-        if pak_path:
-            valid_mod_lines.append(f"*{pak_path}\n")
-        else:
-            fallback_path = f"{SERVERS_ROOT}/{plugin_id}/steamapps/workshop/content/{mods_meta['steam_workshop_appid']}/{mod_id}/{mod_id}.pak".replace("\\", "/")
-            valid_mod_lines.append(f"*{fallback_path}\n")
+        # 3. LINKEN & EINTRAGEN
+        if pak_path and pak_filename:
+            target_pak = os.path.join(mods_dir, pak_filename)
+            try:
+                # Der "Jedi-Trick": Hardlink erstellt eine 1:1 Spiegelung mit 0 Byte Speicherverbrauch!
+                os.link(pak_path, target_pak)
+            except OSError:
+                # Nur absoluter Notfall-Fallback, falls das Dateisystem netzwerkübergreifende Links verbietet
+                shutil.copy2(pak_path, target_pak)
+                
+            # Für UE5 Enhanced: Ausschließlich den Dateinamen mit Sternchen nutzen! Kein absoluter Pfad!
+            valid_mod_lines.append(f"*{pak_filename}\n")
 
+    # 4. MODLIST SPEICHERN
     with open(real_modlist_path, "w", encoding="utf-8") as f:
         f.writelines(valid_mod_lines)
 
