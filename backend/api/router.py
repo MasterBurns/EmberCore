@@ -8,8 +8,9 @@ import logging
 from core.env import (
     EXE_DIR, BASE_DIR, SERVERS_ROOT, DATA_ROOT, PLUGINS_ROOT, DEV_PLUGINS_ROOT,
     BACKUPS_ROOT, START_TIME, sys_config, logger, game_update_cache, disk_cache,
-    get_current_system_version, steam_manager, backup_manager
+    get_current_system_version
 )
+from core.managers import steam_manager, backup_manager
 from core.server_manager import server_manager
 from core.config_manager import ConfigManager
 
