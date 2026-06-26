@@ -81,7 +81,7 @@ class SteamCMDManager:
         except Exception as e:
             return {"status": "error", "message": f"SteamCMD Fehler: {e}"}
 
-   def update_workshop_mods(self, plugin_id: str, workshop_appid: str, mods_info: list):
+    def update_workshop_mods(self, plugin_id: str, workshop_appid: str, mods_info: list):
         import platform, subprocess, os
         from core.env import logger
         
