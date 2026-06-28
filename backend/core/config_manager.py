@@ -143,3 +143,64 @@ class ConfigManager:
                 new_lines.append(f"{key}={val_str}\n")
 
         with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
+
+
+    @staticmethod
+    def enforce_cluster_rules(plugin_id: str, manifest: dict):
+        """
+        Zwingt dem Server vor dem Start die kritischen Cluster-Settings auf.
+        Verhindert Charakterverlust durch Fehlkonfiguration.
+        """
+        if "cluster_meta" not in manifest: return
+
+        server_dir = ConfigManager.get_server_dir(plugin_id)
+
+        for rule in manifest["cluster_meta"].get("enforce_files", []):
+            file_path = os.path.abspath(os.path.join(server_dir, rule["file_path"]))
+
+            # Falls die Config noch nicht existiert (First Boot), Ordner erstellen
+            if not os.path.exists(file_path):
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                open(file_path, 'a').close()
+
+            if rule.get("format") == "ini":
+                with open(file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                for section, kv_pairs in rule.get("values", {}).items():
+                    section_header = f"[{section}]"
+                    section_found = any(line.strip() == section_header for line in lines)
+
+                    if not section_found:
+                        lines.append(f"\n{section_header}\n")
+
+                    for k, v in kv_pairs.items():
+                        in_section = False
+                        key_found = False
+
+                        for i, line in enumerate(lines):
+                            stripped = line.strip()
+                            if stripped.startswith("[") and stripped != section_header:
+                                in_section = False
+                            if stripped == section_header:
+                                in_section = True
+
+                            # Wenn wir in der richtigen Sektion sind und den Key finden -> Überschreiben
+                            if in_section and stripped.lower().startswith(f"{k.lower()}="):
+                                lines[i] = f"{k}={v}\n"
+                                key_found = True
+                                break
+
+                        # Wenn der Key fehlt, direkt unter die Sektionsüberschrift einfügen
+                        if not key_found:
+                            for i, line in enumerate(lines):
+                                if line.strip() == section_header:
+                                    lines.insert(i + 1, f"{k}={v}\n")
+                                    break
+
+                # Datei sauber zurückschreiben
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+
+                from core.env import logger
+                logger.info(f"[*] Cluster-Sicherheitsprotokoll: {os.path.basename(file_path)} für '{plugin_id}' synchronisiert.")

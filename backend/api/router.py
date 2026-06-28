@@ -47,21 +47,62 @@ def get_clusters():
 def create_cluster(payload: dict = Body(...)):
     cluster_id = payload.get("cluster_id")
     name = payload.get("name", "Neuer Cluster")
+    game_name = payload.get("game_name", "ARK: Survival Ascended")  # NEU: Spielbindung
+    custom_path = payload.get("custom_path", "").strip()
+
     if not cluster_id: return {"status": "error", "message": "Keine Cluster-ID angegeben."}
 
     db = get_clusters_db()
     if cluster_id in db: return {"status": "error", "message": "Cluster-ID existiert bereits."}
 
-    shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
-    os.makedirs(shared_dir, exist_ok=True)
+    # === CUSTOM PATH LOGIK ===
+    if custom_path:
+        shared_dir = os.path.abspath(custom_path).replace("\\", "/")
+    else:
+        shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
+
+    try:
+        os.makedirs(shared_dir, exist_ok=True)
+    except Exception as e:
+        return {"status": "error", "message": f"Konnte Ordner nicht erstellen: {e}"}
 
     db[cluster_id] = {
         "name": name,
+        "game_name": game_name,  # NEU: In DB speichern
         "shared_dir": shared_dir,
         "members": []
     }
     save_clusters_db(db)
-    return {"status": "success", "message": f"Cluster '{name}' erstellt!"}
+    return {"status": "success", "message": f"Cluster '{name}' für {game_name} erstellt!"}
+
+@router.post("/clusters/open-folder/{cluster_id}")
+def open_cluster_folder(cluster_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    shared_dir = db[cluster_id].get("shared_dir")
+    if not shared_dir or not os.path.exists(shared_dir):
+        return {"status": "error", "message": "Der Ordner wurde noch nicht vom System erstellt."}
+
+    # Öffnet den Pfad nativ im Windows Explorer oder Linux File Manager
+    if platform.system() == "Windows": os.startfile(shared_dir)
+    elif platform.system() == "Linux": subprocess.Popen(["xdg-open", shared_dir])
+
+    return {"status": "success"}
+
+@router.delete("/clusters/delete/{cluster_id}")
+def delete_cluster(cluster_id: str):
+    """Löscht einen Cluster aus der DB. Zugeordnete Server werden automatisch isoliert."""
+    db = get_clusters_db()
+    if cluster_id not in db:
+        return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    # Die Verzeichnisdaten bleiben sicherheitshalber unangetastet,
+    # damit keine Savegames verloren gehen – wir löschen nur die logische Clusterbindung.
+    del db[cluster_id]
+    save_clusters_db(db)
+    logger.info(f"[-] Cluster '{cluster_id}' wurde manuell aufgelöst.")
+    return {"status": "success", "message": "Cluster erfolgreich aufgelöst."}
 
 @router.post("/clusters/assign/{cluster_id}/{plugin_id}")
 def assign_to_cluster(cluster_id: str, plugin_id: str):
@@ -349,6 +390,31 @@ def remove_from_cluster(plugin_id: str):
 @router.get("/system/health")
 def system_health():
     return {"status": "ok"}
+
+@router.post("/system/shutdown")
+def shutdown_embercore():
+    logger.info("[-] Manueller Shutdown angefordert. Beende Watchdogs...")
+
+    # 1. Zuerst alle Watchdogs im OS aufspüren und töten
+    import psutil
+    for p in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            cmdline = p.info.get('cmdline') or []
+            if "--watchdog" in cmdline:
+                p.kill()
+        except: pass
+
+    # 2. Den eigenen Prozess mit 1.5 Sekunden Verzögerung beenden
+    # (damit das Backend noch die "Erfolg"-Nachricht an dein Frontend schicken kann)
+    def seppuku():
+        import time
+        time.sleep(1.5)
+        os._exit(0)
+
+    import threading
+    threading.Thread(target=seppuku, daemon=True).start()
+
+    return {"status": "success", "message": "EmberCore fährt herunter."}
 
 @router.get("/system/settings")
 def get_sys_settings():
@@ -641,13 +707,18 @@ def start(plugin_id: str):
 
     args = manifest.get("default_args", []).copy()
 
-    # === DYNAMISCHE CLUSTER INJECTION ===
+    # === DYNAMISCHE CLUSTER INJECTION & SICHERHEIT ===
     db = get_clusters_db()
     for cluster_id, cdata in db.items():
         if plugin_id in cdata.get("members", []):
             shared_dir = cdata.get("shared_dir")
             os.makedirs(shared_dir, exist_ok=True)
-            logger.info(f"[*] Cluster erkannt! Injiziere Cluster-Daten für '{cluster_id}'...")
+            logger.info(f"[*] Server ist Teil von Cluster '{cluster_id}'. Führe Pre-Flight Check aus...")
+
+            # 1. Zwingende INI-Werte patchen, um Charakterverlust zu verhindern!
+            ConfigManager.enforce_cluster_rules(plugin_id, manifest)
+
+            # 2. Start-Parameter für die Exe (ARK spezifisch, aber dynamisch für UE)
             args.append(f"-clusterid={cluster_id}")
             args.append(f"-ClusterDirOverride=\"{shared_dir}\"")
             args.append("-NoTransferFromFiltering")

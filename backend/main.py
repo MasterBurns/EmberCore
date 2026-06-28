@@ -66,7 +66,7 @@ class CompiledSafeScheduler(BackupScheduler):
         from core.config_manager import ConfigManager
         import json
         from datetime import datetime, timedelta
-        
+
         plugin_ids = set()
         for folder in [PLUGINS_ROOT, DEV_PLUGINS_ROOT]:
             if os.path.exists(folder):
@@ -119,7 +119,7 @@ class CompiledSafeScheduler(BackupScheduler):
                 if manifest and manifest.get("backup"):
                     logger.info(f"Führe geplantes Backup für {plugin_id} aus...")
                     self.backup_manager.create_backup(plugin_id, os.path.join(SERVERS_ROOT, plugin_id), manifest.get("backup").get("source_path"), retention)
-            
+
             if schedules_updated:
                 os.makedirs(os.path.dirname(schedule_file), exist_ok=True)
                 with open(schedule_file, "w", encoding="utf-8") as f: json.dump(config, f, indent=2)
@@ -132,9 +132,9 @@ async def lifespan(app: FastAPI):
     from core.update_manager import update_manager
     if hasattr(update_manager, 'prepare_steamcmd'):
         await update_manager.prepare_steamcmd()
-    
+
     asyncio.create_task(scheduler.start_loop())
-    
+
     from api.router import force_check_game_updates
     from core.config_manager import ConfigManager
     async def game_update_checker_loop():
@@ -151,7 +151,7 @@ async def lifespan(app: FastAPI):
                             seen.add(p_id)
             except: pass
             await asyncio.sleep(3600)
-            
+
     asyncio.create_task(game_update_checker_loop())
 
     # Watchdog Spawner (abgekoppelt)
@@ -165,7 +165,7 @@ async def lifespan(app: FastAPI):
             subprocess.Popen(cmd, cwd=EXE_DIR, creationflags=flags, start_new_session=True if platform.system() != "Windows" else False)
 
     watchdog_spawner()
-    
+
     # Browser öffnen
     def open_browser():
         flag_path = os.path.join(EXE_DIR, ".update_reboot")
@@ -189,17 +189,34 @@ app.include_router(router)
 # 5. Das modulare Vue.js Frontend bereitstellen
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "static"), html=True), name="static")
 
+def clean_orphaned_watchdogs():
+    """Killt alle alten Watchdogs vor dem Start, um Boot-Loops zu verhindern."""
+    import psutil
+    current_pid = os.getpid()
+    for p in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            cmdline = p.info.get('cmdline') or []
+            if "--watchdog" in cmdline and p.info['pid'] != current_pid:
+                logger.info(f"[*] Bereinige verwaisten Geister-Watchdog (PID {p.info['pid']})...")
+                p.kill()
+        except: pass
+
 def main():
     global ACTIVE_PORT
+
+    # NEU: Erst aufräumen, dann Port binden!
+    if "--watchdog" not in sys.argv and "--service" not in sys.argv:
+        clean_orphaned_watchdogs()
+
     port = 8000
     while socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('127.0.0.1', port)) == 0: port += 10
     ACTIVE_PORT = port
     env.ACTIVE_PORT = port
-    
+
     log_config = uvicorn.config.LOGGING_CONFIG
     if not sys_config.get("verbose_logging"):
         log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
-        
+
     logger.info(f"[*] EmberCore startet Webserver auf Port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port, log_config=log_config)
 

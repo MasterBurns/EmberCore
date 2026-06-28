@@ -12,12 +12,24 @@ default_args:
   - "TheIsland_WP?listen?SessionName=EmberCore_ASA?Port=7777?QueryPort=27015?MaxPlayers=20?RCONEnabled=True?RCONPort=27020?ServerAdminPassword=EmberCoreRcon"
   - "-server"
   - "-log"
-  - "-clusterid={{CLUSTER_ID}}"
-  - "-ClusterDirOverride={{CLUSTER_SHARED_DIR}}"
   - "-NoTransferFromFiltering"
   - "-NoBattlEye"
   - "-automanagedmods"
 
+cluster_meta:
+enforce_files:
+- file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
+    format: "ini"
+    values:
+    ServerSettings:
+        PreventDownloadSurvivors: "False"
+        PreventDownloadItems: "False"
+        PreventDownloadDinos: "False"
+        PreventUploadSurvivors: "False"
+        PreventUploadItems: "False"
+        PreventUploadDinos: "False"
+        noTributeDownloads: "False"
+        crossARKAllowForeignDinosaurDownloads: "True"
 # Automatisierte Firewall & Portfreigaben (Windows)
 network_meta:
   ports:

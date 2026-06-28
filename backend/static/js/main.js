@@ -6,9 +6,10 @@ import Sidebar from './components/Sidebar.js';
 import SystemTab from './components/SystemTab.js';
 import Marketplace from './components/Marketplace.js';
 import ServerTab from './components/ServerTab.js';
+import ClusterManager from './components/ClusterManager.js';
 
 const App = {
-    components: { Modals, Sidebar, SystemTab, Marketplace, ServerTab },
+    components: { Modals, Sidebar, SystemTab, Marketplace, ServerTab, ClusterManager },
     setup() {
         onMounted(() => {
             api.loadSystemInfo();
@@ -41,6 +42,8 @@ const App = {
     <SystemTab v-if="store.currentView === 'system_status'" />
     <Marketplace v-if="store.currentView === 'marketplace'" />
     <ServerTab v-if="store.currentView === 'server'" />
+
+    <ClusterManager v-if="store.currentView === 'cluster_manager'" />
     </main>
     `
 };

@@ -9,9 +9,19 @@ export default {
     <h1 class="text-2xl font-black text-white tracking-wide truncate">EmberCore Hintergrund-Dienste</h1>
     <p class="text-sm text-gray-500 font-mono mt-1">Version: <span class="text-gray-400">{{ store.systemInfo.version }}</span></p>
     </div>
+
+    <div class="flex items-center gap-3">
     <button @click="api.triggerSystemUpdate()" :disabled="store.isSystemUpdating" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-500 text-white shadow-sm">
     {{ store.isSystemUpdating ? 'Suche Update...' : '🔄 Update prüfen' }}
     </button>
+    <button @click="shutdownEmberCore" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-red-600 hover:bg-red-500 text-white shadow-sm gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+    </svg>
+    EmberCore stoppen
+    </button>
+    </div>
+
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     <div class="bg-gray-950 p-6 rounded-xl border border-gray-900 shadow-xl space-y-5">
@@ -70,5 +80,56 @@ export default {
     </div>
     </div>
     </div>
-    `
+    `,
+    methods: {
+        async shutdownEmberCore() {
+            // Asynchrones Custom-Popup über unsere globale API
+            const isConfirmed = await this.api.confirm(
+                "EmberCore beenden",
+                "Möchtest du EmberCore wirklich komplett beenden?\n\nAlle laufenden Gameserver bleiben im Hintergrund aktiv, aber das Panel ist offline."
+            );
+
+            if (!isConfirmed) {
+                return;
+            }
+
+            try {
+                await fetch('/api/system/shutdown', { method: 'POST' });
+
+                // Den Bildschirm verdunkeln und den Countdown anzeigen
+                document.body.innerHTML = `
+                <div style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0b0f19; color: #fff; font-family: ui-sans-serif, system-ui, sans-serif;">
+                <h1 style="color: #ef4444; font-size: 2rem; font-weight: bold; margin-bottom: 10px;">🔥 EmberCore offline</h1>
+                <p style="color: #9ca3af;">Das Panel und die Hintergrund-Dienste wurden beendet.</p>
+                <p id="countdown-text" style="color: #4b5563; font-size: 14px; margin-top: 20px; border: 1px solid #1f2937; padding: 5px 10px; border-radius: 5px;">Browserfenster schließt sich in 5 Sekunden...</p>
+                </div>
+                `;
+
+                // 5 Sekunden Countdown starten
+                let secondsLeft = 5;
+                const countdownInterval = setInterval(() => {
+                    secondsLeft--;
+                    const textEl = document.getElementById('countdown-text');
+
+                    if (textEl) {
+                        textEl.innerText = `Browserfenster schließt sich in ${secondsLeft} Sekunden...`;
+                    }
+
+                    // Bei 0 versuchen, den Tab zu schließen
+                    if (secondsLeft <= 0) {
+                        clearInterval(countdownInterval);
+                        window.close(); // Versuch 1: Normaler Close-Befehl
+
+                        // Fallback für Browser, die das Schließen aus Sicherheitsgründen blockieren
+                        setTimeout(() => {
+                            if (textEl) textEl.innerText = "Du kannst dieses Fenster nun sicher schließen.";
+                        }, 500);
+                    }
+                }, 1000);
+
+            } catch (e) {
+                console.error("Shutdown fehlgeschlagen", e);
+            }
+        }
+    }
 };

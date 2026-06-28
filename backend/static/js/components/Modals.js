@@ -30,13 +30,13 @@ export default {
     </div>
     <div class="p-6 space-y-4">
     <p class="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{{ store.uiModal.message }}</p>
-    <input v-if="store.uiModal.type === 'prompt'" id="modal-input" type="text" v-model="store.uiModal.inputVal" :placeholder="store.uiModal.placeholder" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none font-mono" @keyup.enter="api.resolveModal(store.uiModal.inputVal)">
+    <input v-if="store.uiModal.type === 'prompt'" id="modal-input" type="text" v-model="store.uiModal.inputVal" :placeholder="store.uiModal.placeholder" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none font-mono" @keyup.enter="api.closeDialog(store.uiModal.inputVal)">
     </div>
     <div class="p-4 border-t border-gray-800 bg-gray-950 flex justify-end gap-3">
-    <button v-if="store.uiModal.type !== 'alert'" @click="api.resolveModal(store.uiModal.type === 'prompt' ? null : false)" class="px-5 py-2.5 rounded-lg text-xs font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">Abbrechen</button>
-    <button v-if="store.uiModal.type === 'alert'" @click="api.resolveModal(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Verstanden</button>
-    <button v-if="store.uiModal.type === 'confirm'" @click="api.resolveModal(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Bestätigen</button>
-    <button v-if="store.uiModal.type === 'prompt'" @click="api.resolveModal(store.uiModal.inputVal)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Speichern</button>
+    <button v-if="store.uiModal.type !== 'alert'" @click="api.closeDialog(store.uiModal.type === 'prompt' ? null : false)" class="px-5 py-2.5 rounded-lg text-xs font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">Abbrechen</button>
+    <button v-if="store.uiModal.type === 'alert'" @click="api.closeDialog(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Verstanden</button>
+    <button v-if="store.uiModal.type === 'confirm'" @click="api.closeDialog(true)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Bestätigen</button>
+    <button v-if="store.uiModal.type === 'prompt'" @click="api.closeDialog(store.uiModal.inputVal)" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Speichern</button>
     </div>
     </div>
     </div>

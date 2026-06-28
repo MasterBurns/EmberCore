@@ -15,6 +15,14 @@ export default {
     <span>⚙️ System & Service</span>
     <span v-if="store.systemUpdateAvailable" class="flex h-2 w-2 relative"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></span>
     </button>
+    <button @click="store.currentView = 'cluster_manager'"
+    :class="store.currentView === 'cluster_manager' ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white'"
+    class="w-full text-left px-4 py-2 rounded-lg mb-2 transition flex items-center justify-between">
+    <div class="flex items-center gap-2">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+    Cluster
+    </div>
+    </button>
     </div>
     <div class="space-y-5 pt-2 border-t border-gray-900/50">
     <div v-for="(instances, gameName) in categorizedPlugins" :key="gameName" class="space-y-1">
