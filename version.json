@@ -1,5 +1,20 @@
 [
   {
+  "version": "v0.1.7.2",
+  "build_date": "2026-06-28",
+  "changelog": [
+    "NEU: Cluster Logik für ASA und andere Games",
+    "NEU: Mod Sync zwischen Cluster Servern"
+  ]
+  },
+  {
+  "version": "v0.1.7.1",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Bestehende Server YAML Update"
+  ]
+  },
+  {
   "version": "v0.1.7.0",
   "build_date": "2026-06-26",
   "changelog": [

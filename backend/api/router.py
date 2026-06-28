@@ -171,6 +171,181 @@ def remove_from_cluster(plugin_id: str):
     save_clusters_db(db)
     return {"status": "success", "message": "Server aus Cluster isoliert."}
 
+@router.get("/clusters/mods/{cluster_id}")
+def get_cluster_mods(cluster_id: str):
+    """Sammelt alle Mods aller Server im Cluster und wirft sie in einen Pool."""
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    cluster_members = db[cluster_id].get("members", [])
+    if not cluster_members: return {"mods": []}
+
+    pooled_mods = {}
+
+    # Durchsuche alle Server im Cluster nach installierten Mods
+    for plugin_id in cluster_members:
+        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+        if os.path.exists(mods_file):
+            try:
+                with open(mods_file, "r", encoding="utf-8") as f:
+                    server_mods = json.load(f)
+                    for mod in server_mods:
+                        # Mod in den Pool werfen, falls noch nicht vorhanden
+                        if mod["id"] not in pooled_mods:
+                            pooled_mods[mod["id"]] = {
+                                "id": mod["id"],
+                                "name": mod.get("name", f"Mod {mod['id']}"),
+                                "version": mod.get("version", "unbekannt"),
+                                "active_on": [plugin_id]
+                            }
+                        else:
+                            pooled_mods[mod["id"]]["active_on"].append(plugin_id)
+            except: pass
+
+    # Rückgabe als Array für das Vue-Frontend
+    return {"mods": list(pooled_mods.values()), "member_count": len(cluster_members)}
+
+@router.post("/clusters/mods/sync/{cluster_id}")
+def sync_cluster_mods(cluster_id: str, payload: dict = Body(...)):
+    """Erzwingt eine Liste von Mod-IDs auf allen Servern im Cluster."""
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    target_mod_ids = payload.get("mod_ids", []) # Array aus IDs, z.B. ["880454836", "123456789"]
+    cluster_members = db[cluster_id].get("members", [])
+
+    if not cluster_members: return {"status": "error", "message": "Der Cluster ist leer."}
+
+    # Wir brauchen die Namen/Versionen der Mods für die saubere Speicherung.
+    # Wir holen sie uns aus dem bestehenden Pool (Route drüber).
+    pool_data = get_cluster_mods(cluster_id).get("mods", [])
+    mod_lookup = { m["id"]: {"id": m["id"], "name": m["name"], "version": m["version"]} for m in pool_data }
+
+    # Erstelle das neue Mod-Array, das auf alle Server gepresst wird
+    unified_mods = []
+    for m_id in target_mod_ids:
+        if m_id in mod_lookup:
+            unified_mods.append(mod_lookup[m_id])
+        else:
+            # Fallback, falls eine komplett neue ID geschickt wird
+            unified_mods.append({"id": m_id, "name": f"Workshop Mod ({m_id})", "version": "unbekannt"})
+
+    # Jetzt schreiben wir das gnadenlos auf alle Cluster-Server
+    for plugin_id in cluster_members:
+        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+        os.makedirs(os.path.dirname(mods_file), exist_ok=True)
+
+        with open(mods_file, "w", encoding="utf-8") as f:
+            json.dump(unified_mods, f, indent=2)
+
+        # Manifest laden und die tatsächliche game-spezifische .txt oder .pak Liste neu generieren
+        manifest = ConfigManager.load_manifest(plugin_id)
+        if manifest:
+            rebuild_modlist(plugin_id, manifest)
+
+    logger.info(f"[*] Cluster '{cluster_id}': {len(unified_mods)} Mods wurden auf {len(cluster_members)} Server synchronisiert.")
+    return {"status": "success", "message": "Mods wurden erfolgreich auf alle Cluster-Server gespiegelt! Sie werden beim nächsten Serverstart heruntergeladen."}
+
+@router.post("/clusters/config/sync/{cluster_id}")
+def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
+    """
+    Nimmt einen Server als Master-Vorlage und spiegelt dessen Gameplay-
+    und Mod-Einstellungen auf alle anderen Server im Cluster.
+    Sicherheitsrelevante Keys (Ports, Namen) werden geschützt.
+    """
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    master_id = payload.get("master_plugin_id")
+    cluster_members = db[cluster_id].get("members", [])
+
+    if not master_id or master_id not in cluster_members:
+        return {"status": "error", "message": "Ungültige oder fehlende Master-Server-ID."}
+
+    if len(cluster_members) < 2:
+        return {"status": "error", "message": "Es müssen mindestens zwei Server im Cluster sein, um zu synchronisieren."}
+
+    # Pfad zur Master-INI
+    master_ini = os.path.abspath(os.path.join(DATA_ROOT, master_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+    if not os.path.exists(master_ini):
+        return {"status": "error", "message": f"Die Master-Konfigurationsdatei wurde auf dem Quellserver nicht gefunden."}
+
+    # Kritische Keys, die NIEMALS überschrieben werden dürfen
+    KEY_BLACKLIST = {
+        "sessionname", "port", "queryport", "rconport", "rconenabled",
+        "serveradminpassword", "serverpassword", "spectatorpassword"
+    }
+
+    # 1. Master-INI parsen und in Sektionen aufteilen
+    master_data = {}
+    current_section = None
+
+    with open(master_ini, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"): continue
+
+            if stripped.startswith("[") and stripped.endswith("]"):
+                current_section = stripped[1:-1]
+                master_data[current_section] = {}
+            elif current_section and "=" in stripped:
+                k, v = stripped.split("=", 1)
+                # Nur hinzufügen, wenn der Key nicht auf der Blacklist steht
+                if k.strip().lower() not in KEY_BLACKLIST:
+                    master_data[current_section][k.strip()] = v.strip()
+
+    # 2. Einstellungen auf alle anderen Cluster-Mitglieder übertragen
+    target_members = [m for m in cluster_members if m != master_id]
+
+    for target_id in target_members:
+        target_ini = os.path.abspath(os.path.join(DATA_ROOT, target_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+
+        # Falls die Datei beim Zielserver noch nicht existiert, leere Datei anlegen
+        if not os.path.exists(target_ini):
+            os.makedirs(os.path.dirname(target_ini), exist_ok=True)
+            open(target_ini, 'a').close()
+
+        # Ziel-INI einlesen
+        with open(target_ini, "r", encoding="utf-8") as f:
+            target_lines = f.readlines()
+
+        # Jede Sektion aus dem Master in die Ziel-INI einpflegen
+        for section, kv_pairs in master_data.items():
+            section_header = f"[{section}]"
+            section_found = any(line.strip() == section_header for line in target_lines)
+
+            if not section_found:
+                target_lines.append(f"\n{section_header}\n")
+
+            for k, v in kv_pairs.items():
+                in_section = False
+                key_found = False
+
+                for i, line in enumerate(target_lines):
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("[") and line_stripped != section_header:
+                        in_section = False
+                    if line_stripped == section_header:
+                        in_section = True
+
+                    if in_section and line_stripped.lower().startswith(f"{k.lower()}="):
+                        target_lines[i] = f"{k}={v}\n"
+                        key_found = True
+                        break
+
+                if not key_found:
+                    for i, line in enumerate(target_lines):
+                        if line.strip() == section_header:
+                            target_lines.insert(i + 1, f"{k}={v}\n")
+                            break
+
+        # Datei sicher abspeichern
+        with open(target_ini, "w", encoding="utf-8") as f:
+            f.writelines(target_lines)
+
+    logger.info(f"[*] Cluster-Config-Sync abgeschlossen. '{master_id}' hat Einstellungen auf {len(target_members)} Server gespiegelt.")
+    return {"status": "success", "message": f"Gameplay- und Mod-Einstellungen erfolgreich von '{master_id}' auf alle Cluster-Server übertragen!"}
+
 # ==========================================
 # HILFSFUNKTIONEN (Helper)
 # ==========================================
