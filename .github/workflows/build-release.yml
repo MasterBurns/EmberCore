@@ -30,9 +30,17 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # FIX: Wir setzen den Suchpfad auf "backend" und erzwingen den Import der Manager!
-        # ADD: --icon "icon.ico" packt das Logo direkt in die .exe (für Taskleiste & Shortcuts)
-        pyinstaller --name "EmberCore" --icon "icon.ico" --paths "backend" --hidden-import "core.steamcmd_manager" --hidden-import "core.backup_manager" --hidden-import "core.update_manager" --hidden-import "core.server_manager" --hidden-import "api.router" --add-data "backend/static;static" --add-data "backend/dev_plugins;dev_plugins" --add-data "version.json;." --clean --noconfirm backend/main.py
+        pyinstaller --name "EmberCore" --icon "icon.ico" --paths "backend" \
+        --hidden-import "core.steamcmd_manager" \
+        --hidden-import "core.backup_manager" \
+        --hidden-import "core.update_manager" \
+        --hidden-import "core.server_manager" \
+        --hidden-import "api.router" \
+        --hidden-import "discord" \
+        --add-data "backend/static;static" \
+        --add-data "backend/dev_plugins;dev_plugins" \
+        --add-data "version.json;." \
+        --clean --noconfirm backend/main.py
 
     - name: Create ZIP (Für Auto-Updater)
       run: |
@@ -106,9 +114,17 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # Unter Linux nutzt PyInstaller Doppelpunkte (:) statt Semikolons (;) bei add-data
-        # FIX: Auch hier die Pfade und erzungenen Imports!
-        pyinstaller --name "EmberCore" --paths "backend" --hidden-import "core.steamcmd_manager" --hidden-import "core.backup_manager" --hidden-import "core.update_manager" --hidden-import "core.server_manager" --hidden-import "api.router" --add-data "backend/static:static" --add-data "backend/dev_plugins:dev_plugins" --add-data "version.json:." --clean --noconfirm backend/main.py
+        pyinstaller --name "EmberCore" --paths "backend" \
+        --hidden-import "core.steamcmd_manager" \
+        --hidden-import "core.backup_manager" \
+        --hidden-import "core.update_manager" \
+        --hidden-import "core.server_manager" \
+        --hidden-import "api.router" \
+        --hidden-import "discord" \
+        --add-data "backend/static:static" \
+        --add-data "backend/dev_plugins:dev_plugins" \
+        --add-data "version.json:." \
+        --clean --noconfirm backend/main.py
 
     - name: Create TAR.GZ (Für Auto-Updater)
       run: |
