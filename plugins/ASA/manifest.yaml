@@ -2,6 +2,12 @@ name: "ARK: Survival Ascended"
 engine: "steamcmd"
 steam_app_id: 2430930
 
+maps:
+  - "TheIsland_WP"
+  - "ScorchedEarth_WP"
+  - "TheCenter_WP"
+  - "Abero_WP"
+
 # Start-Dateien
 executable_windows: "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
 executable_linux: "ShooterGame/Binaries/Linux/ArkAscendedServer" 
