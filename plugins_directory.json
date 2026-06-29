@@ -7,5 +7,14 @@
     "developer": "MasterBurns",
     "yaml_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/ConanExiles/manifest.yaml",
     "description": "Conan Exiles Server"
+  },
+  {
+    "id": "ArkSurvival_Ascended",
+    "name": "Ark Survival Ascended Dedicated Server",
+    "category": "Survival",
+    "version": "1.0.0",
+    "developer": "MasterBurns",
+    "yaml_url": "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/ASA/manifest.yaml",
+    "description": "Ark Survival Ascended Server"
   }
 ]
