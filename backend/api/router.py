@@ -22,8 +22,9 @@ router = APIRouter(prefix="/api")
 
 class InstallRequest(BaseModel): install_dir_name: str = None
 
+
 # ==========================================
-# CLUSTER MANAGEMENT (ARK, etc.)
+# HILFSFUNKTIONEN (Helper)
 # ==========================================
 def get_clusters_db():
     db_path = os.path.join(DATA_ROOT, "clusters_db.json")
@@ -39,321 +40,6 @@ def save_clusters_db(data):
     with open(db_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-@router.get("/clusters")
-def get_clusters():
-    return get_clusters_db()
-
-@router.post("/clusters/create")
-def create_cluster(payload: dict = Body(...)):
-    cluster_id = payload.get("cluster_id")
-    name = payload.get("name", "Neuer Cluster")
-    game_name = payload.get("game_name", "ARK: Survival Ascended")  # NEU: Spielbindung
-    custom_path = payload.get("custom_path", "").strip()
-
-    if not cluster_id: return {"status": "error", "message": "Keine Cluster-ID angegeben."}
-
-    db = get_clusters_db()
-    if cluster_id in db: return {"status": "error", "message": "Cluster-ID existiert bereits."}
-
-    # === CUSTOM PATH LOGIK ===
-    if custom_path:
-        shared_dir = os.path.abspath(custom_path).replace("\\", "/")
-    else:
-        shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
-
-    try:
-        os.makedirs(shared_dir, exist_ok=True)
-    except Exception as e:
-        return {"status": "error", "message": f"Konnte Ordner nicht erstellen: {e}"}
-
-    db[cluster_id] = {
-        "name": name,
-        "game_name": game_name,  # NEU: In DB speichern
-        "shared_dir": shared_dir,
-        "members": []
-    }
-    save_clusters_db(db)
-    return {"status": "success", "message": f"Cluster '{name}' für {game_name} erstellt!"}
-
-@router.post("/clusters/open-folder/{cluster_id}")
-def open_cluster_folder(cluster_id: str):
-    db = get_clusters_db()
-    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    shared_dir = db[cluster_id].get("shared_dir")
-    if not shared_dir or not os.path.exists(shared_dir):
-        return {"status": "error", "message": "Der Ordner wurde noch nicht vom System erstellt."}
-
-    # Öffnet den Pfad nativ im Windows Explorer oder Linux File Manager
-    if platform.system() == "Windows": os.startfile(shared_dir)
-    elif platform.system() == "Linux": subprocess.Popen(["xdg-open", shared_dir])
-
-    return {"status": "success"}
-
-@router.delete("/clusters/delete/{cluster_id}")
-def delete_cluster(cluster_id: str):
-    """Löscht einen Cluster aus der DB. Zugeordnete Server werden automatisch isoliert."""
-    db = get_clusters_db()
-    if cluster_id not in db:
-        return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    # Die Verzeichnisdaten bleiben sicherheitshalber unangetastet,
-    # damit keine Savegames verloren gehen – wir löschen nur die logische Clusterbindung.
-    del db[cluster_id]
-    save_clusters_db(db)
-    logger.info(f"[-] Cluster '{cluster_id}' wurde manuell aufgelöst.")
-    return {"status": "success", "message": "Cluster erfolgreich aufgelöst."}
-
-@router.post("/clusters/assign/{cluster_id}/{plugin_id}")
-def assign_to_cluster(cluster_id: str, plugin_id: str):
-    db = get_clusters_db()
-    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    # Aus alten Clustern entfernen
-    for cid, cdata in db.items():
-        if plugin_id in cdata["members"]:
-            cdata["members"].remove(plugin_id)
-
-    # PORT-KOLLISIONS-PRÜFUNG
-    manifest = ConfigManager.load_manifest(plugin_id)
-    if manifest and "config_meta" in manifest:
-        desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
-        new_desired = {}
-        if os.path.exists(desired_path):
-            try:
-                with open(desired_path, "r", encoding="utf-8") as f: new_desired = json.load(f)
-            except: pass
-
-        used_ports = set()
-        for member in db[cluster_id]["members"]:
-            m_desired_path = os.path.join(DATA_ROOT, member, "desired_config.json")
-            if os.path.exists(m_desired_path):
-                try:
-                    with open(m_desired_path, "r", encoding="utf-8") as f:
-                        m_data = json.load(f)
-                        for k, v in m_data.items():
-                            if "port" in k.lower():
-                                try: used_ports.add(int(v))
-                                except: pass
-                except: pass
-
-        updated_ports = False
-        for field in manifest["config_meta"].get("fields", []):
-            key = field["key"]
-            if "port" in key.lower():
-                current_port = int(new_desired.get(key, field.get("default", 0)))
-                original_port = current_port
-
-                while current_port in used_ports:
-                    current_port += 2
-
-                if current_port != original_port:
-                    new_desired[key] = current_port
-                    used_ports.add(current_port)
-                    updated_ports = True
-
-        if updated_ports:
-            logger.info(f"[*] Port-Konflikt in Cluster '{cluster_id}' gelöst! Neue Ports gespeichert.")
-            os.makedirs(os.path.dirname(desired_path), exist_ok=True)
-            with open(desired_path, "w", encoding="utf-8") as f: json.dump(new_desired, f, indent=2)
-            ConfigManager.apply_desired_config(plugin_id)
-
-    db[cluster_id]["members"].append(plugin_id)
-    save_clusters_db(db)
-    return {"status": "success", "message": f"Server zum Cluster hinzugefügt (Ports automatisch abgeglichen)."}
-
-@router.post("/clusters/remove/{plugin_id}")
-def remove_from_cluster(plugin_id: str):
-    db = get_clusters_db()
-    for cid, cdata in db.items():
-        if plugin_id in cdata["members"]:
-            cdata["members"].remove(plugin_id)
-    save_clusters_db(db)
-    return {"status": "success", "message": "Server aus Cluster isoliert."}
-
-@router.get("/clusters/mods/{cluster_id}")
-def get_cluster_mods(cluster_id: str):
-    """Sammelt alle Mods aller Server im Cluster und wirft sie in einen Pool."""
-    db = get_clusters_db()
-    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    cluster_members = db[cluster_id].get("members", [])
-    if not cluster_members: return {"mods": []}
-
-    pooled_mods = {}
-
-    # Durchsuche alle Server im Cluster nach installierten Mods
-    for plugin_id in cluster_members:
-        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
-        if os.path.exists(mods_file):
-            try:
-                with open(mods_file, "r", encoding="utf-8") as f:
-                    server_mods = json.load(f)
-                    for mod in server_mods:
-                        # Mod in den Pool werfen, falls noch nicht vorhanden
-                        if mod["id"] not in pooled_mods:
-                            pooled_mods[mod["id"]] = {
-                                "id": mod["id"],
-                                "name": mod.get("name", f"Mod {mod['id']}"),
-                                "version": mod.get("version", "unbekannt"),
-                                "active_on": [plugin_id]
-                            }
-                        else:
-                            pooled_mods[mod["id"]]["active_on"].append(plugin_id)
-            except: pass
-
-    # Rückgabe als Array für das Vue-Frontend
-    return {"mods": list(pooled_mods.values()), "member_count": len(cluster_members)}
-
-@router.post("/clusters/mods/sync/{cluster_id}")
-def sync_cluster_mods(cluster_id: str, payload: dict = Body(...)):
-    """Erzwingt eine Liste von Mod-IDs auf allen Servern im Cluster."""
-    db = get_clusters_db()
-    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    target_mod_ids = payload.get("mod_ids", []) # Array aus IDs, z.B. ["880454836", "123456789"]
-    cluster_members = db[cluster_id].get("members", [])
-
-    if not cluster_members: return {"status": "error", "message": "Der Cluster ist leer."}
-
-    # Wir brauchen die Namen/Versionen der Mods für die saubere Speicherung.
-    # Wir holen sie uns aus dem bestehenden Pool (Route drüber).
-    pool_data = get_cluster_mods(cluster_id).get("mods", [])
-    mod_lookup = { m["id"]: {"id": m["id"], "name": m["name"], "version": m["version"]} for m in pool_data }
-
-    # Erstelle das neue Mod-Array, das auf alle Server gepresst wird
-    unified_mods = []
-    for m_id in target_mod_ids:
-        if m_id in mod_lookup:
-            unified_mods.append(mod_lookup[m_id])
-        else:
-            # Fallback, falls eine komplett neue ID geschickt wird
-            unified_mods.append({"id": m_id, "name": f"Workshop Mod ({m_id})", "version": "unbekannt"})
-
-    # Jetzt schreiben wir das gnadenlos auf alle Cluster-Server
-    for plugin_id in cluster_members:
-        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
-        os.makedirs(os.path.dirname(mods_file), exist_ok=True)
-
-        with open(mods_file, "w", encoding="utf-8") as f:
-            json.dump(unified_mods, f, indent=2)
-
-        # Manifest laden und die tatsächliche game-spezifische .txt oder .pak Liste neu generieren
-        manifest = ConfigManager.load_manifest(plugin_id)
-        if manifest:
-            rebuild_modlist(plugin_id, manifest)
-
-    logger.info(f"[*] Cluster '{cluster_id}': {len(unified_mods)} Mods wurden auf {len(cluster_members)} Server synchronisiert.")
-    return {"status": "success", "message": "Mods wurden erfolgreich auf alle Cluster-Server gespiegelt! Sie werden beim nächsten Serverstart heruntergeladen."}
-
-@router.get("/clusters/config/sections/{cluster_id}/{plugin_id}")
-def get_cluster_config_sections(cluster_id: str, plugin_id: str):
-    """Liest alle verfügbaren Sektionsüberschriften aus der Master-INI aus."""
-    ini_path = os.path.abspath(os.path.join(DATA_ROOT, plugin_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
-    if not os.path.exists(ini_path):
-        return {"sections": []}
-
-    sections = []
-    try:
-        with open(ini_path, "r", encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped.startswith("[") and stripped.endswith("]"):
-                    sections.append(stripped[1:-1])
-    except Exception as e:
-        logger.error(f"Fehler beim Lesen der Sektionen: {e}")
-
-    return {"sections": sections}
-
-@router.post("/clusters/config/sync/{cluster_id}")
-def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
-    """Spiegelt Einstellungen. Unterstützt optional selektive Sektionsfilterung."""
-    db = get_clusters_db()
-    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
-
-    master_id = payload.get("master_plugin_id")
-    selected_sections = payload.get("selected_sections", []) # NEU: Wenn leer -> Alle Sektionen
-    cluster_members = db[cluster_id].get("members", [])
-
-    if not master_id or master_id not in cluster_members:
-        return {"status": "error", "message": "Ungültige Master-Server-ID."}
-    if len(cluster_members) < 2:
-        return {"status": "error", "message": "Mindestens zwei Server benötigt."}
-
-    master_ini = os.path.abspath(os.path.join(DATA_ROOT, master_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
-    if not os.path.exists(master_ini):
-        return {"status": "error", "message": "Master-Konfigurationsdatei nicht gefunden."}
-
-    KEY_BLACKLIST = {
-        "sessionname", "port", "queryport", "rconport", "rconenabled",
-        "serveradminpassword", "serverpassword", "spectatorpassword"
-    }
-
-    # 1. Master-INI selektiv einlesen
-    master_data = {}
-    current_section = None
-
-    with open(master_ini, "r", encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped or stripped.startswith(";"): continue
-
-            if stripped.startswith("[") and stripped.endswith("]"):
-                current_section = stripped[1:-1]
-                # FILTER: Wenn Filter aktiv und Sektion nicht gewählt -> überspringen
-                if selected_sections and current_section not in selected_sections:
-                    current_section = None
-                if current_section and current_section not in master_data:
-                    master_data[current_section] = {}
-            elif current_section and "=" in stripped:
-                k, v = stripped.split("=", 1)
-                if k.strip().lower() not in KEY_BLACKLIST:
-                    master_data[current_section][k.strip()] = v.strip()
-
-    # 2. Auf Ziel-Server schreiben
-    target_members = [m for m in cluster_members if m != master_id]
-    for target_id in target_members:
-        target_ini = os.path.abspath(os.path.join(DATA_ROOT, target_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
-        if not os.path.exists(target_ini):
-            os.makedirs(os.path.dirname(target_ini), exist_ok=True)
-            open(target_ini, 'a').close()
-
-        with open(target_ini, "r", encoding="utf-8") as f:
-            target_lines = f.readlines()
-
-        for section, kv_pairs in master_data.items():
-            section_header = f"[{section}]"
-            section_found = any(line.strip() == section_header for line in target_lines)
-            if not section_found:
-                target_lines.append(f"\n{section_header}\n")
-
-            for k, v in kv_pairs.items():
-                in_section = False
-                key_found = False
-                for i, line in enumerate(target_lines):
-                    line_stripped = line.strip()
-                    if line_stripped.startswith("[") and line_stripped != section_header:
-                        in_section = False
-                    if line_stripped == section_header:
-                        in_section = True
-                    if in_section and line_stripped.lower().startswith(f"{k.lower()}="):
-                        target_lines[i] = f"{k}={v}\n"
-                        key_found = True
-                        break
-                if not key_found:
-                    for i, line in enumerate(target_lines):
-                        if line.strip() == section_header:
-                            target_lines.insert(i + 1, f"{k}={v}\n")
-                            break
-
-        with open(target_ini, "w", encoding="utf-8") as f:
-            f.writelines(target_lines)
-
-    return {"status": "success", "message": "Synchronisierung erfolgreich abgeschlossen!"}
-
-# ==========================================
-# HILFSFUNKTIONEN (Helper)
-# ==========================================
 def calculate_disk_trend(plugin_id: str):
     now = datetime.now()
     if plugin_id in disk_cache:
@@ -450,20 +136,6 @@ def rebuild_modlist(plugin_id: str, manifest: dict):
 # ==========================================
 # CLUSTER MANAGEMENT (ARK, etc.)
 # ==========================================
-def get_clusters_db():
-    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
-    if os.path.exists(db_path):
-        try:
-            with open(db_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: pass
-    return {}
-
-def save_clusters_db(data):
-    db_path = os.path.join(DATA_ROOT, "clusters_db.json")
-    with open(db_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
 @router.get("/clusters")
 def get_clusters():
     return get_clusters_db()
@@ -472,34 +144,64 @@ def get_clusters():
 def create_cluster(payload: dict = Body(...)):
     cluster_id = payload.get("cluster_id")
     name = payload.get("name", "Neuer Cluster")
+    game_name = payload.get("game_name", "ARK: Survival Ascended")  
+    custom_path = payload.get("custom_path", "").strip()
+
     if not cluster_id: return {"status": "error", "message": "Keine Cluster-ID angegeben."}
 
     db = get_clusters_db()
     if cluster_id in db: return {"status": "error", "message": "Cluster-ID existiert bereits."}
 
-    # Der neutrale Ordner für Charakter-Transfers
-    shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
-    os.makedirs(shared_dir, exist_ok=True)
+    if custom_path:
+        shared_dir = os.path.abspath(custom_path).replace("\\", "/")
+    else:
+        shared_dir = os.path.abspath(os.path.join(DATA_ROOT, "shared_clusters", cluster_id)).replace("\\", "/")
+
+    try:
+        os.makedirs(shared_dir, exist_ok=True)
+    except Exception as e:
+        return {"status": "error", "message": f"Konnte Ordner nicht erstellen: {e}"}
 
     db[cluster_id] = {
         "name": name,
+        "game_name": game_name,
         "shared_dir": shared_dir,
         "members": []
     }
     save_clusters_db(db)
-    return {"status": "success", "message": f"Cluster '{name}' erstellt!"}
+    return {"status": "success", "message": f"Cluster '{name}' für {game_name} erstellt!"}
+
+@router.post("/clusters/open-folder/{cluster_id}")
+def open_cluster_folder(cluster_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    shared_dir = db[cluster_id].get("shared_dir")
+    if not shared_dir or not os.path.exists(shared_dir):
+        return {"status": "error", "message": "Der Ordner wurde noch nicht vom System erstellt."}
+
+    if platform.system() == "Windows": os.startfile(shared_dir)
+    elif platform.system() == "Linux": subprocess.Popen(["xdg-open", shared_dir])
+    return {"status": "success"}
+
+@router.delete("/clusters/delete/{cluster_id}")
+def delete_cluster(cluster_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+    del db[cluster_id]
+    save_clusters_db(db)
+    logger.info(f"[-] Cluster '{cluster_id}' wurde manuell aufgelöst.")
+    return {"status": "success", "message": "Cluster erfolgreich aufgelöst."}
 
 @router.post("/clusters/assign/{cluster_id}/{plugin_id}")
 def assign_to_cluster(cluster_id: str, plugin_id: str):
     db = get_clusters_db()
     if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
 
-    # 1. Server sicherheitshalber aus allen anderen Clustern entfernen
     for cid, cdata in db.items():
         if plugin_id in cdata["members"]:
             cdata["members"].remove(plugin_id)
 
-    # 2. PORT-KOLLISIONS-PRÜFUNG (Anti-Crash)
     manifest = ConfigManager.load_manifest(plugin_id)
     if manifest and "config_meta" in manifest:
         desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
@@ -509,7 +211,6 @@ def assign_to_cluster(cluster_id: str, plugin_id: str):
                 with open(desired_path, "r", encoding="utf-8") as f: new_desired = json.load(f)
             except: pass
 
-        # Sammle alle bereits belegten Ports der ANDEREN Server in diesem Cluster
         used_ports = set()
         for member in db[cluster_id]["members"]:
             m_desired_path = os.path.join(DATA_ROOT, member, "desired_config.json")
@@ -523,16 +224,13 @@ def assign_to_cluster(cluster_id: str, plugin_id: str):
                                 except: pass
                 except: pass
 
-        # Prüfe und passe die Ports des NEUEN Servers an
         updated_ports = False
         for field in manifest["config_meta"].get("fields", []):
             key = field["key"]
             if "port" in key.lower():
-                # Hole aktuellen oder Standard-Port
                 current_port = int(new_desired.get(key, field.get("default", 0)))
                 original_port = current_port
 
-                # Solange der Port belegt ist, rechne +2 drauf (typisch für Unreal Engine)
                 while current_port in used_ports:
                     current_port += 2
 
@@ -541,17 +239,14 @@ def assign_to_cluster(cluster_id: str, plugin_id: str):
                     used_ports.add(current_port)
                     updated_ports = True
 
-        # Wenn Ports geändert wurden, speichern und live Config anwenden
         if updated_ports:
-            logger.info(f"[*] Port-Konflikt in Cluster '{cluster_id}' gelöst! Neue Ports für {plugin_id} gespeichert.")
+            logger.info(f"[*] Port-Konflikt in Cluster '{cluster_id}' gelöst! Neue Ports gespeichert.")
             os.makedirs(os.path.dirname(desired_path), exist_ok=True)
             with open(desired_path, "w", encoding="utf-8") as f: json.dump(new_desired, f, indent=2)
             ConfigManager.apply_desired_config(plugin_id)
 
-    # 3. Server final dem Cluster hinzufügen
     db[cluster_id]["members"].append(plugin_id)
     save_clusters_db(db)
-
     return {"status": "success", "message": f"Server zum Cluster hinzugefügt (Ports automatisch abgeglichen)."}
 
 @router.post("/clusters/remove/{plugin_id}")
@@ -563,42 +258,171 @@ def remove_from_cluster(plugin_id: str):
     save_clusters_db(db)
     return {"status": "success", "message": "Server aus Cluster isoliert."}
 
+@router.get("/clusters/mods/{cluster_id}")
+def get_cluster_mods(cluster_id: str):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    cluster_members = db[cluster_id].get("members", [])
+    if not cluster_members: return {"mods": []}
+
+    pooled_mods = {}
+    for plugin_id in cluster_members:
+        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+        if os.path.exists(mods_file):
+            try:
+                with open(mods_file, "r", encoding="utf-8") as f:
+                    server_mods = json.load(f)
+                    for mod in server_mods:
+                        if mod["id"] not in pooled_mods:
+                            pooled_mods[mod["id"]] = {
+                                "id": mod["id"],
+                                "name": mod.get("name", f"Mod {mod['id']}"),
+                                "version": mod.get("version", "unbekannt"),
+                                "active_on": [plugin_id]
+                            }
+                        else:
+                            pooled_mods[mod["id"]]["active_on"].append(plugin_id)
+            except: pass
+    return {"mods": list(pooled_mods.values()), "member_count": len(cluster_members)}
+
+@router.post("/clusters/mods/sync/{cluster_id}")
+def sync_cluster_mods(cluster_id: str, payload: dict = Body(...)):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    target_mod_ids = payload.get("mod_ids", [])
+    cluster_members = db[cluster_id].get("members", [])
+    if not cluster_members: return {"status": "error", "message": "Der Cluster ist leer."}
+
+    pool_data = get_cluster_mods(cluster_id).get("mods", [])
+    mod_lookup = { m["id"]: {"id": m["id"], "name": m["name"], "version": m["version"]} for m in pool_data }
+
+    unified_mods = []
+    for m_id in target_mod_ids:
+        if m_id in mod_lookup: unified_mods.append(mod_lookup[m_id])
+        else: unified_mods.append({"id": m_id, "name": f"Workshop Mod ({m_id})", "version": "unbekannt"})
+
+    for plugin_id in cluster_members:
+        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+        os.makedirs(os.path.dirname(mods_file), exist_ok=True)
+        with open(mods_file, "w", encoding="utf-8") as f: json.dump(unified_mods, f, indent=2)
+        manifest = ConfigManager.load_manifest(plugin_id)
+        if manifest: rebuild_modlist(plugin_id, manifest)
+
+    logger.info(f"[*] Cluster '{cluster_id}': {len(unified_mods)} Mods wurden auf {len(cluster_members)} Server synchronisiert.")
+    return {"status": "success", "message": "Mods wurden erfolgreich auf alle Cluster-Server gespiegelt! Sie werden beim nächsten Serverstart heruntergeladen."}
+
+@router.get("/clusters/config/sections/{cluster_id}/{plugin_id}")
+def get_cluster_config_sections(cluster_id: str, plugin_id: str):
+    ini_path = os.path.abspath(os.path.join(DATA_ROOT, plugin_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+    if not os.path.exists(ini_path): return {"sections": []}
+
+    sections = []
+    try:
+        with open(ini_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    sections.append(stripped[1:-1])
+    except Exception as e: logger.error(f"Fehler beim Lesen der Sektionen: {e}")
+    return {"sections": sections}
+
+@router.post("/clusters/config/sync/{cluster_id}")
+def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
+    db = get_clusters_db()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+
+    master_id = payload.get("master_plugin_id")
+    selected_sections = payload.get("selected_sections", [])
+    cluster_members = db[cluster_id].get("members", [])
+
+    if not master_id or master_id not in cluster_members: return {"status": "error", "message": "Ungültige Master-Server-ID."}
+    if len(cluster_members) < 2: return {"status": "error", "message": "Mindestens zwei Server benötigt."}
+
+    master_ini = os.path.abspath(os.path.join(DATA_ROOT, master_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+    if not os.path.exists(master_ini): return {"status": "error", "message": "Master-Konfigurationsdatei nicht gefunden."}
+
+    KEY_BLACKLIST = {"sessionname", "port", "queryport", "rconport", "rconenabled", "serveradminpassword", "serverpassword", "spectatorpassword"}
+    master_data = {}
+    current_section = None
+
+    with open(master_ini, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"): continue
+
+            if stripped.startswith("[") and stripped.endswith("]"):
+                current_section = stripped[1:-1]
+                if selected_sections and current_section not in selected_sections: current_section = None
+                if current_section and current_section not in master_data: master_data[current_section] = {}
+            elif current_section and "=" in stripped:
+                k, v = stripped.split("=", 1)
+                if k.strip().lower() not in KEY_BLACKLIST:
+                    master_data[current_section][k.strip()] = v.strip()
+
+    target_members = [m for m in cluster_members if m != master_id]
+    for target_id in target_members:
+        target_ini = os.path.abspath(os.path.join(DATA_ROOT, target_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+        if not os.path.exists(target_ini):
+            os.makedirs(os.path.dirname(target_ini), exist_ok=True)
+            open(target_ini, 'a').close()
+
+        with open(target_ini, "r", encoding="utf-8") as f: target_lines = f.readlines()
+
+        for section, kv_pairs in master_data.items():
+            section_header = f"[{section}]"
+            section_found = any(line.strip() == section_header for line in target_lines)
+            if not section_found: target_lines.append(f"\n{section_header}\n")
+
+            for k, v in kv_pairs.items():
+                in_section = False
+                key_found = False
+                for i, line in enumerate(target_lines):
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("[") and line_stripped != section_header: in_section = False
+                    if line_stripped == section_header: in_section = True
+                    if in_section and line_stripped.lower().startswith(f"{k.lower()}="):
+                        target_lines[i] = f"{k}={v}\n"
+                        key_found = True
+                        break
+                if not key_found:
+                    for i, line in enumerate(target_lines):
+                        if line.strip() == section_header:
+                            target_lines.insert(i + 1, f"{k}={v}\n")
+                            break
+
+        with open(target_ini, "w", encoding="utf-8") as f: f.writelines(target_lines)
+
+    return {"status": "success", "message": "Synchronisierung erfolgreich abgeschlossen!"}
+
 
 # ==========================================
 # SYSTEM & SERVICE ROUTEN
 # ==========================================
 @router.get("/system/health")
-def system_health():
-    return {"status": "ok"}
+def system_health(): return {"status": "ok"}
 
 @router.post("/system/shutdown")
 def shutdown_embercore():
     logger.info("[-] Manueller Shutdown angefordert. Beende Watchdogs...")
-
-    # 1. Zuerst alle Watchdogs im OS aufspüren und töten
     import psutil
     for p in psutil.process_iter(['pid', 'cmdline']):
         try:
             cmdline = p.info.get('cmdline') or []
-            if "--watchdog" in cmdline:
-                p.kill()
+            if "--watchdog" in cmdline: p.kill()
         except: pass
 
-    # 2. Den eigenen Prozess mit 1.5 Sekunden Verzögerung beenden
-    # (damit das Backend noch die "Erfolg"-Nachricht an dein Frontend schicken kann)
     def seppuku():
         import time
         time.sleep(1.5)
         os._exit(0)
-
     import threading
     threading.Thread(target=seppuku, daemon=True).start()
-
     return {"status": "success", "message": "EmberCore fährt herunter."}
 
 @router.get("/system/settings")
-def get_sys_settings():
-    return sys_config
+def get_sys_settings(): return sys_config
 
 @router.post("/system/settings")
 def save_sys_settings_api(data: dict = Body(...)):
@@ -617,8 +441,7 @@ def get_sys_logs():
         if os.path.exists(log_file):
             with open(log_file, "r", encoding="utf-8", errors="replace") as f:
                 return {"logs": "".join(f.readlines()[-1000:])}
-    except Exception as e:
-        return {"logs": f"Lese-Fehler: {e}"}
+    except Exception as e: return {"logs": f"Lese-Fehler: {e}"}
     return {"logs": "Bisher keine Logs vorhanden."}
 
 @router.post("/system/logs/clear")
@@ -778,8 +601,6 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
         if os.path.exists(manifest_path):
             with open(manifest_path, "r", encoding="utf-8") as f: manifest = yaml.safe_load(f)
             manifest["id"] = instance_id
-
-            # SPEICHERN DER CLOUD-URL FÜR UPDATES
             manifest["source_url"] = url if not url.endswith(".zip") else ""
 
             with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
@@ -803,9 +624,7 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
 # ==========================================
 @router.post("/server/install/{plugin_id}")
 def install_server(plugin_id: str, req: InstallRequest = None):
-    # 1. NEU: Ziehe VOR dem Update das neueste YAML aus der Cloud!
     ConfigManager.sync_manifest_from_cloud(plugin_id)
-
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
 
@@ -886,6 +705,18 @@ def start(plugin_id: str):
         executable_path = os.path.join(SERVERS_ROOT, plugin_id, manifest.get("executable_windows"))
 
     args = manifest.get("default_args", []).copy()
+
+    # === NEU: KARTEN-INJECTOR ===
+    startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
+    if os.path.exists(startup_file) and args and "?" in args[0]:
+        try:
+            with open(startup_file, "r") as f:
+                saved_map = json.load(f).get("map")
+                if saved_map:
+                    parts = args[0].split("?", 1)
+                    args[0] = f"{saved_map}?{parts[1]}"
+                    logger.info(f"[*] Map Override: Starte Server mit Karte '{saved_map}'")
+        except: pass
 
     # === DYNAMISCHE CLUSTER INJECTION & SICHERHEIT ===
     db = get_clusters_db()
@@ -986,7 +817,6 @@ async def add_server_mod(plugin_id: str, mod_id: str):
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
 
     rebuild_modlist(plugin_id, manifest)
-
     return {"status": "success", "message": f"Mod '{mod_name}' zur Liste hinzugefügt. Bitte klicke nun auf 'Install / Update', um sie herunterzuladen!"}
 
 @router.delete("/server/mods/delete/{plugin_id}/{mod_id}")
@@ -1001,7 +831,6 @@ def delete_server_mod(plugin_id: str, mod_id: str):
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
 
     rebuild_modlist(plugin_id, manifest)
-
     return {"status": "success", "message": "Mod entfernt."}
 
 @router.delete("/server/delete/{plugin_id}")
@@ -1191,4 +1020,31 @@ def restore_backup(plugin_id: str, filename: str):
 @router.delete("/server/backup/delete/{plugin_id}/{filename}")
 def delete_backup(plugin_id: str, filename: str):
     backup_manager.delete_backup(plugin_id, filename)
+    return {"status": "success"}
+
+@router.get("/server/startup/{plugin_id}")
+def get_server_startup(plugin_id: str):
+    """Liest aus dem Manifest, ob Karten wählbar sind, und lädt die aktuelle Auswahl."""
+    manifest = ConfigManager.load_manifest(plugin_id)
+    if not manifest: return {"enabled": False}
+    
+    maps = manifest.get("maps", [])
+    if not maps: return {"enabled": False} 
+    
+    selected_map = maps[0]
+    startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
+    if os.path.exists(startup_file):
+        try:
+            with open(startup_file, "r") as f:
+                selected_map = json.load(f).get("map", selected_map)
+        except: pass
+        
+    return {"enabled": True, "available_maps": maps, "selected_map": selected_map}
+
+@router.post("/server/startup/{plugin_id}")
+def save_server_startup(plugin_id: str, payload: dict = Body(...)):
+    """Speichert die gewünschte Karte für den nächsten Start ab."""
+    startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
+    with open(startup_file, "w") as f:
+        json.dump({"map": payload.get("selected_map")}, f)
     return {"status": "success"}
