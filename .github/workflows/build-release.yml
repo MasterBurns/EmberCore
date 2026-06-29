@@ -27,72 +27,24 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name "EmberCore" --icon "icon.ico" --onefile ^
+        # Wir nutzen 'python -m PyInstaller', um sicherzustellen, dass er aus dem installierten Environment baut
+        python -m PyInstaller --name "EmberCore" --icon "icon.ico" --onefile ^
         --collect-all core ^
         --collect-all discord ^
         --collect-all fastapi ^
         --add-data "backend/static;static" ^
         --add-data "backend/dev_plugins;dev_plugins" ^
         --add-data "version.json;." ^
-        --clean --noconfirm backend/main.py || exit 1
+        --clean --noconfirm backend/main.py
 
-    - name: Create ZIP (Für Auto-Updater)
+    - name: Create ZIP
       run: Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
 
-    - name: Write Inno Setup Script
-      shell: pwsh
-      run: |
-        $version = "${{ github.ref_name }}".TrimStart('v')
-        $iss = @"
-        [Setup]
-        AppName=EmberCore
-        AppVersion=$version
-        DefaultDirName=C:\EmberCore
-        DefaultGroupName=EmberCore
-        UninstallDisplayIcon={app}\EmberCore.exe
-        SetupIconFile=icon.ico
-        Compression=lzma2
-        SolidCompression=yes
-        OutputDir=.
-        OutputBaseFilename=EmberCore_Setup_Windows_${{ github.ref_name }}
-        PrivilegesRequired=admin
-
-        [Files]
-        Source: "dist\EmberCore.exe"; DestDir: "{app}"; Flags: ignoreversion
-        Source: "backend\static\*"; DestDir: "{app}\static"; Flags: recursesubdirs
-        Source: "backend\dev_plugins\*"; DestDir: "{app}\dev_plugins"; Flags: recursesubdirs
-        Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
-
-        [Icons]
-        Name: "{autoprograms}\EmberCore"; Filename: "{app}\EmberCore.exe"
-        Name: "{autodesktop}\EmberCore"; Filename: "{app}\EmberCore.exe"; Tasks: desktopicon
-
-        [Tasks]
-        Name: "desktopicon"; Description: "Desktop-Symbol erstellen"; GroupDescription: "Zusätzliche Symbole:"
-
-        [Run]
-        Filename: "{app}\EmberCore.exe"; Description: "EmberCore jetzt starten"; Flags: nowait postinstall skipifsilent runasoriginaluser
-        "@
-        Set-Content -Path installer.iss -Value $iss -Encoding UTF8
-
-    - name: Compile Windows Setup.exe
-      shell: pwsh
-      run: |
-        $issPath = "installer.iss"
-        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-        if (Test-Path $isccPath) {
-            & $isccPath $issPath
-        } else {
-            Write-Error "Inno Setup nicht gefunden unter $isccPath"
-            exit 1
-        }
-
-    - name: Upload Windows Release Files
+    - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
           EmberCore_Windows_${{ github.ref_name }}.zip
-          EmberCore_Setup_Windows_${{ github.ref_name }}.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
