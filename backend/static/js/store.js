@@ -40,6 +40,7 @@ export const store = reactive({
     isLogViewerOpen: false,
     systemLogData: "Lade Logs...",
     sysConfig: { verbose_logging: false, allow_multiple_instances: false }
+    startupData: { enabled: false, available_maps: [], selected_map: "" },
 });
 
 export const categorizedPlugins = computed(() => {
@@ -130,7 +131,10 @@ export const api = {
     selectServer(id) { store.selectedPlugin = id; store.currentView = "server"; store.serverTab = "status"; store.serverStats.disk = null; store.consoleLogs = []; this.fetchStats(); },
     openConsoleTab() { store.serverTab = 'console'; this.fetchStats(); },
     async openConfigTab() {
-        store.serverTab = 'config'; const res = await fetch(`/api/server/config/${store.selectedPlugin}`);
+        store.serverTab = 'config'; 
+        
+        // INI laden
+        const res = await fetch(`/api/server/config/${store.selectedPlugin}`);
         if (res.ok) {
             const data = await res.json();
             if (data.enabled && data.values) {
@@ -139,6 +143,11 @@ export const api = {
             }
             store.configData = data;
         }
+
+        // NEU: Map laden
+        const startRes = await fetch(`/api/server/startup/${store.selectedPlugin}`);
+        if (startRes.ok) store.startupData = await startRes.json();
+        else store.startupData = { enabled: false, available_maps: [], selected_map: "" };
     },
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
     async saveList(lst) { const payload = {}; payload[lst.id] = lst.content; await fetch(`/api/server/lists/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await this.alert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert"); },
@@ -172,7 +181,18 @@ export const api = {
             if(data.status === "success" && data.instance_id) this.selectServer(data.instance_id);
         } catch (e) { await this.alert("Server-Paket konnte nicht heruntergeladen werden.", "Netzwerkfehler"); store.isSubscribing = null; }
     },
-    async saveConfig() { await fetch(`/api/server/config/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(store.configData.values) }); this.loadInstalledPlugins(); await this.alert("Die Konfiguration wurde erfolgreich gespeichert.", "Erfolg"); },
+    async saveConfig() { 
+        // INI speichern
+        await fetch(`/api/server/config/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(store.configData.values) }); 
+        
+        // NEU: Map speichern
+        if (store.startupData.enabled) {
+            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map }) });
+        }
+        
+        this.loadInstalledPlugins(); 
+        await this.alert("Die Konfiguration wurde erfolgreich gespeichert.", "Erfolg"); 
+    },
     async installServer() { store.isActionLoading = true; store.loadingMessage = "SteamCMD synchronisiert Spieldateien..."; await fetch(`/api/server/install/${store.selectedPlugin}`, { method: 'POST' }); store.isActionLoading = false; this.fetchStats(); },
     async startServer() { store.isActionLoading = true; store.loadingMessage = "Initialisiere Prozessumgebung..."; const res = await fetch(`/api/server/start/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); if(data.status === 'error') await this.alert(data.message, "Start blockiert"); store.isActionLoading = false; setTimeout(() => this.fetchStats(), 1000); },
     async stopServer() { store.isActionLoading = true; store.loadingMessage = "Sende Shutdown Signal an Prozesse..."; await fetch(`/api/server/stop/${store.selectedPlugin}`, { method: 'POST' }); store.isActionLoading = false; setTimeout(() => this.fetchStats(), 500); },
