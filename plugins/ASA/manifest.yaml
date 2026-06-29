@@ -62,6 +62,7 @@ backup:
 config_meta:
   file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
   fields:
+    # --- GRUNDEINSTELLUNGEN ---
     - key: "SessionName"
       label: "Server Name"
       type: "text"
@@ -81,6 +82,69 @@ config_meta:
       label: "Maximale Spieler"
       type: "number"
       default: 20
+
+    # --- GAMEPLAY MULTIPLIKATOREN ---
+    - key: "HarvestAmountMultiplier"
+      label: "Ernterate (Harvest)"
+      type: "number"
+      default: 1.0
+
+    - key: "TamingSpeedMultiplier"
+      label: "Zähm-Geschwindigkeit (Taming)"
+      type: "number"
+      default: 1.0
+
+    - key: "XPMultiplier"
+      label: "Erfahrungs-Multiplikator (XP)"
+      type: "number"
+      default: 1.0
+
+    - key: "MatingIntervalMultiplier"
+      label: "Paarungs-Intervall (Mating)"
+      type: "number"
+      default: 1.0
+
+    - key: "EggHatchSpeedMultiplier"
+      label: "Eier-Brutgeschwindigkeit (Hatching)"
+      type: "number"
+      default: 1.0
+
+    - key: "BabyMatureSpeedMultiplier"
+      label: "Baby-Wachstum (Maturation)"
+      type: "number"
+      default: 1.0
+
+    # --- SCHWIERIGKEIT ---
+    - key: "DifficultyOffset"
+      label: "Schwierigkeitsgrad-Offset (0.1 - 1.0)"
+      type: "number"
+      default: 0.2
+
+    - key: "OverrideOfficialDifficulty"
+      label: "Maximales Dino-Level (z.B. 5.0 = Lvl 150)"
+      type: "number"
+      default: 5.0
+
+    # --- REGELN & QoL (Wird als Toggle-Switch angezeigt) ---
+    - key: "ShowMapPlayerLocation"
+      label: "Spieler-Position auf Karte anzeigen"
+      type: "boolean"
+      default: True
+
+    - key: "AllowThirdPersonPlayer"
+      label: "Third-Person Ansicht erlauben"
+      type: "boolean"
+      default: True
+
+    - key: "ServerCrosshair"
+      label: "Fadenkreuz aktivieren"
+      type: "boolean"
+      default: False
+
+    - key: "EnablePvPGamma"
+      label: "Gamma-Anpassung erlauben"
+      type: "boolean"
+      default: True
 
 # Crash-Erkennung & Diagnostik
 diagnostics:
