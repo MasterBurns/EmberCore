@@ -76,7 +76,16 @@ jobs:
         Set-Content -Path installer.iss -Value $iss -Encoding UTF8
 
     - name: Compile Windows Setup.exe
-      run: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      shell: pwsh
+      run: |
+        $issPath = "installer.iss"
+        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        if (Test-Path $isccPath) {
+            & $isccPath $issPath
+        } else {
+            Write-Error "Inno Setup nicht gefunden unter $isccPath"
+            exit 1
+        }
 
     - name: Upload Windows Release Files
       uses: softprops/action-gh-release@v1
