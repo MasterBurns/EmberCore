@@ -56,7 +56,12 @@ jobs:
         [Setup]
         AppName=EmberCore
         AppVersion=$version
-        DefaultDirName={pf}\EmberCore
+        DefaultDirName=C:\EmberCore
+        DefaultGroupName=EmberCore
+        UninstallDisplayIcon={app}\EmberCore.exe
+        SetupIconFile=icon.ico
+        Compression=lzma2
+        SolidCompression=yes
         OutputDir=.
         OutputBaseFilename=EmberCore_Setup_Windows_${{ github.ref_name }}
         PrivilegesRequired=admin
@@ -69,6 +74,13 @@ jobs:
         
         [Icons]
         Name: "{autoprograms}\EmberCore"; Filename: "{app}\EmberCore.exe"
+        Name: "{autodesktop}\EmberCore"; Filename: "{app}\EmberCore.exe"; Tasks: desktopicon
+        
+        [Tasks]
+        Name: "desktopicon"; Description: "Desktop-Symbol erstellen"; GroupDescription: "Zusätzliche Symbole:"
+        
+        [Run]
+        Filename: "{app}\EmberCore.exe"; Description: "EmberCore jetzt starten"; Flags: nowait postinstall skipifsilent runasoriginaluser
         "@
         Set-Content -Path installer.iss -Value $iss -Encoding UTF8
 
