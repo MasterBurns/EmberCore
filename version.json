@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.7.4",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "NEU: Clusterlogic Config Sync erweitern"
+  ]
+  },
+  {
   "version": "v0.1.7.3",
   "build_date": "2026-06-29",
   "changelog": [
