@@ -4,7 +4,7 @@ export default {
     setup() { return { store, api }; },
     template: `
     <div class="max-w-4xl mx-auto space-y-6">
-    <div><h1 class="text-2xl font-black text-white tracking-tight">Neuen Server hinzufügen</h1><p class="text-sm text-gray-400">Wähle eine Server-Engine aus der Cloud aus, um eine neue Instanz zu erstellen.</p></div>
+    <div><h1 class="text-2xl font-black text-white tracking-tight">Neuen Server hinzufügen</h1><p class="text-sm text-gray-400">Einen neuen Server aus einer Vorlage erstellen.</p></div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     <div v-for="plugin in store.availablePlugins" :key="plugin.id" class="bg-gray-950 rounded-xl border border-gray-900 p-5 flex flex-col justify-between shadow-xl transition hover:border-gray-800">
     <div class="space-y-3">
