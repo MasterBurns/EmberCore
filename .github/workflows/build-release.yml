@@ -9,9 +9,6 @@ permissions:
   contents: write
 
 jobs:
-  # ==========================================
-  # WINDOWS BUILD (Setup EXE & Auto-Update ZIP)
-  # ==========================================
   build-windows:
     runs-on: windows-latest
     steps:
@@ -26,25 +23,21 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic
+        pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic discord.py
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name "EmberCore" --icon "icon.ico" --paths "backend" \
-        --hidden-import "core.steamcmd_manager" \
-        --hidden-import "core.backup_manager" \
-        --hidden-import "core.update_manager" \
-        --hidden-import "core.server_manager" \
-        --hidden-import "api.router" \
-        --hidden-import "discord" \
-        --add-data "backend/static;static" \
-        --add-data "backend/dev_plugins;dev_plugins" \
-        --add-data "version.json;." \
-        --clean --noconfirm backend/main.py
+        pyinstaller --name "EmberCore" --icon "icon.ico" --onefile ^
+        --collect-all core ^
+        --collect-all discord ^
+        --collect-all fastapi ^
+        --add-data "backend/static;static" ^
+        --add-data "backend/dev_plugins;dev_plugins" ^
+        --add-data "version.json;." ^
+        --clean --noconfirm backend/main.py || exit 1
 
     - name: Create ZIP (Für Auto-Updater)
-      run: |
-        Compress-Archive -Path dist\EmberCore\* -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
+      run: Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
 
     - name: Write Inno Setup Script
       shell: pwsh
@@ -65,7 +58,10 @@ jobs:
         PrivilegesRequired=admin
 
         [Files]
-        Source: "dist\EmberCore\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+        Source: "dist\EmberCore.exe"; DestDir: "{app}"; Flags: ignoreversion
+        Source: "backend\static\*"; DestDir: "{app}\static"; Flags: recursesubdirs
+        Source: "backend\dev_plugins\*"; DestDir: "{app}\dev_plugins"; Flags: recursesubdirs
+        Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
 
         [Icons]
         Name: "{autoprograms}\EmberCore"; Filename: "{app}\EmberCore.exe"
@@ -80,8 +76,7 @@ jobs:
         Set-Content -Path installer.iss -Value $iss -Encoding UTF8
 
     - name: Compile Windows Setup.exe
-      run: |
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+      run: & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
     - name: Upload Windows Release Files
       uses: softprops/action-gh-release@v1
@@ -92,9 +87,6 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ==========================================
-  # LINUX BUILD (Setup RUN & Auto-Update TAR.GZ)
-  # ==========================================
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -109,52 +101,38 @@ jobs:
     - name: Install Dependencies & Makeself
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic
+        pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic discord.py
         sudo apt-get update && sudo apt-get install -y makeself
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name "EmberCore" --paths "backend" \
-        --hidden-import "core.steamcmd_manager" \
-        --hidden-import "core.backup_manager" \
-        --hidden-import "core.update_manager" \
-        --hidden-import "core.server_manager" \
-        --hidden-import "api.router" \
-        --hidden-import "discord" \
+        pyinstaller --name "EmberCore" --onefile \
+        --collect-all core \
+        --collect-all discord \
+        --collect-all fastapi \
         --add-data "backend/static:static" \
         --add-data "backend/dev_plugins:dev_plugins" \
         --add-data "version.json:." \
-        --clean --noconfirm backend/main.py
+        --clean --noconfirm backend/main.py || exit 1
 
     - name: Create TAR.GZ (Für Auto-Updater)
-      run: |
-        cd dist/EmberCore
-        tar -czvf ../../EmberCore_Linux_${{ github.ref_name }}.tar.gz .
-        cd ../..
+      run: tar -czvf EmberCore_Linux_${{ github.ref_name }}.tar.gz -C dist EmberCore
 
     - name: Prepare Linux Setup Script
       run: |
         mkdir -p dist/EmberCore_Setup
-        cp -R dist/EmberCore/* dist/EmberCore_Setup/
+        cp dist/EmberCore dist/EmberCore_Setup/
+        cp -R backend/static dist/EmberCore_Setup/
+        cp -R backend/dev_plugins dist/EmberCore_Setup/
+        cp version.json dist/EmberCore_Setup/
+        
         cat << 'EOF' > dist/EmberCore_Setup/install.sh
         #!/bin/bash
-        echo "🔥 Installiere EmberCore..."
         TARGET="/opt/EmberCore"
-
-        if [ "$EUID" -ne 0 ]; then
-          echo "Installation benötigt Root-Rechte. Bitte Passwort eingeben:"
-          sudo mkdir -p "$TARGET"
-          sudo cp -R ./* "$TARGET/"
-          sudo chmod +x "$TARGET/EmberCore"
-        else
-          mkdir -p "$TARGET"
-          cp -R ./* "$TARGET/"
-          chmod +x "$TARGET/EmberCore"
-        fi
-
-        echo "✅ Installation abgeschlossen!"
-        echo "EmberCore liegt in $TARGET."
-        echo "Tippe im Terminal einfach 'sudo $TARGET/EmberCore' ein, um das Panel zu starten."
+        sudo mkdir -p "$TARGET"
+        sudo cp -R ./* "$TARGET/"
+        sudo chmod +x "$TARGET/EmberCore"
+        echo "✅ EmberCore installiert unter $TARGET"
         EOF
         chmod +x dist/EmberCore_Setup/install.sh
 
