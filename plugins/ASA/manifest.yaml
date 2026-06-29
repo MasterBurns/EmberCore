@@ -17,19 +17,20 @@ default_args:
   - "-automanagedmods"
 
 cluster_meta:
-enforce_files:
-- file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
-    format: "ini"
-    values:
-    ServerSettings:
-        PreventDownloadSurvivors: "False"
-        PreventDownloadItems: "False"
-        PreventDownloadDinos: "False"
-        PreventUploadSurvivors: "False"
-        PreventUploadItems: "False"
-        PreventUploadDinos: "False"
-        noTributeDownloads: "False"
-        crossARKAllowForeignDinosaurDownloads: "True"
+  enforce_files:
+    - file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
+      format: "ini"
+      values:
+        ServerSettings:
+          PreventDownloadSurvivors: "False"
+          PreventDownloadItems: "False"
+          PreventDownloadDinos: "False"
+          PreventUploadSurvivors: "False"
+          PreventUploadItems: "False"
+          PreventUploadDinos: "False"
+          noTributeDownloads: "False"
+          crossARKAllowForeignDinosaurDownloads: "True"
+
 # Automatisierte Firewall & Portfreigaben (Windows)
 network_meta:
   ports:
