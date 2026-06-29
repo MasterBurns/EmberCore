@@ -39,13 +39,50 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit 1 }
 
     - name: Create ZIP
-      run: Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
+      shell: pwsh
+      run: |
+        # Wir prüfen explizit, ob die exe da ist, wo wir sie erwarten
+        if (Test-Path "dist\EmberCore.exe") {
+            Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
+        } else {
+            Write-Error "EmberCore.exe nicht gefunden in dist!"
+            exit 1
+        }
+
+    - name: Write Inno Setup Script
+      shell: pwsh
+      run: |
+        $version = "${{ github.ref_name }}".TrimStart('v')
+        $iss = @"
+        [Setup]
+        AppName=EmberCore
+        AppVersion=$version
+        DefaultDirName={pf}\EmberCore
+        OutputBaseFilename=EmberCore_Setup_Windows_${{ github.ref_name }}
+        PrivilegesRequired=admin
+        [Files]
+        Source: "dist\EmberCore.exe"; DestDir: "{app}"; Flags: ignoreversion
+        Source: "backend\static\*"; DestDir: "{app}\static"; Flags: recursesubdirs
+        Source: "backend\dev_plugins\*"; DestDir: "{app}\dev_plugins"; Flags: recursesubdirs
+        Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
+        [Icons]
+        Name: "{autoprograms}\EmberCore"; Filename: "{app}\EmberCore.exe"
+        "@
+        Set-Content -Path installer.iss -Value $iss -Encoding UTF8
+
+    - name: Compile Windows Setup
+      shell: pwsh
+      run: |
+        # Wir installieren Inno Setup kurz per Choco, um sicherzugehen, dass ISCC da ist
+        choco install innosetup -y
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
     - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
           EmberCore_Windows_${{ github.ref_name }}.zip
+          EmberCore_Setup_Windows_${{ github.ref_name }}.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -54,21 +91,17 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-
-    - name: Install Dependencies & Makeself
+    - name: Install Dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic discord.py
         sudo apt-get update && sudo apt-get install -y makeself
-
     - name: Build with PyInstaller
       run: |
-        pyinstaller --name "EmberCore" --onefile \
+        python -m PyInstaller --name "EmberCore" --onefile \
         --collect-all core \
         --collect-all discord \
         --collect-all fastapi \
@@ -76,36 +109,20 @@ jobs:
         --add-data "backend/dev_plugins:dev_plugins" \
         --add-data "version.json:." \
         --clean --noconfirm backend/main.py || exit 1
-
-    - name: Create TAR.GZ (Für Auto-Updater)
-      run: tar -czvf EmberCore_Linux_${{ github.ref_name }}.tar.gz -C dist EmberCore
-
-    - name: Prepare Linux Setup Script
+    - name: Prepare Linux Setup
       run: |
         mkdir -p dist/EmberCore_Setup
         cp dist/EmberCore dist/EmberCore_Setup/
-        cp -R backend/static dist/EmberCore_Setup/
-        cp -R backend/dev_plugins dist/EmberCore_Setup/
+        cp -r backend/static dist/EmberCore_Setup/
+        cp -r backend/dev_plugins dist/EmberCore_Setup/
         cp version.json dist/EmberCore_Setup/
-        
-        cat << 'EOF' > dist/EmberCore_Setup/install.sh
-        #!/bin/bash
-        TARGET="/opt/EmberCore"
-        sudo mkdir -p "$TARGET"
-        sudo cp -R ./* "$TARGET/"
-        sudo chmod +x "$TARGET/EmberCore"
-        echo "✅ EmberCore installiert unter $TARGET"
-        EOF
+        echo -e '#!/bin/bash\n/opt/EmberCore/EmberCore' > dist/EmberCore_Setup/install.sh
         chmod +x dist/EmberCore_Setup/install.sh
-
-    - name: Compile Linux .run Installer
-      run: makeself dist/EmberCore_Setup EmberCore_Setup_Linux_${{ github.ref_name }}.run "EmberCore Linux Installer" ./install.sh
-
-    - name: Upload Linux Release Files
+        makeself dist/EmberCore_Setup EmberCore_Setup_Linux_${{ github.ref_name }}.run "EmberCore" ./install.sh
+    - name: Upload Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          EmberCore_Linux_${{ github.ref_name }}.tar.gz
           EmberCore_Setup_Linux_${{ github.ref_name }}.run
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
