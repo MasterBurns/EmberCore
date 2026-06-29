@@ -26,16 +26,17 @@ jobs:
         pip install pyinstaller fastapi uvicorn psutil httpx pyyaml pydantic discord.py
 
     - name: Build with PyInstaller
+      shell: pwsh
       run: |
-        # Wir nutzen 'python -m PyInstaller', um sicherzustellen, dass er aus dem installierten Environment baut
-        python -m PyInstaller --name "EmberCore" --icon "icon.ico" --onefile ^
-        --collect-all core ^
-        --collect-all discord ^
-        --collect-all fastapi ^
-        --add-data "backend/static;static" ^
-        --add-data "backend/dev_plugins;dev_plugins" ^
-        --add-data "version.json;." ^
+        python -m PyInstaller --name "EmberCore" --icon "icon.ico" --onefile `
+        --collect-all core `
+        --collect-all discord `
+        --collect-all fastapi `
+        --add-data "backend/static;static" `
+        --add-data "backend/dev_plugins;dev_plugins" `
+        --add-data "version.json;." `
         --clean --noconfirm backend/main.py
+        if ($LASTEXITCODE -ne 0) { exit 1 }
 
     - name: Create ZIP
       run: Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
