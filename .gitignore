@@ -1,5 +1,6 @@
 # Virtuelle Umgebung und Python Cache
 .venv/
+.vscode/
 __pycache__/
 *.pyc
 dist/
@@ -18,3 +19,5 @@ backend/data/
 !backend/dev_plugins/
 
 EmberCore.spec
+install_service.sh
+uninstall_service.sh

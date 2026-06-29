@@ -39,8 +39,8 @@ export const store = reactive({
     uiModal: { show: false, type: 'alert', title: '', message: '', inputVal: '', placeholder: '', resolve: null },
     isLogViewerOpen: false,
     systemLogData: "Lade Logs...",
-    sysConfig: { verbose_logging: false, allow_multiple_instances: false }
-    startupData: { enabled: false, available_maps: [], selected_map: "" },
+    sysConfig: { verbose_logging: false, allow_multiple_instances: false },
+    startupData: { enabled: false, available_maps: [], selected_map: "" }
 });
 
 export const categorizedPlugins = computed(() => {

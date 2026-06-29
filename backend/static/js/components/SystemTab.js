@@ -1,14 +1,16 @@
 import { store, api, formatUptime } from '../store.js';
 
 export default {
-    setup() { return { store, api, formatUptime }; },
+    setup() { 
+        return { store, api, formatUptime }; 
+    },
     template: `
     <div class="max-w-5xl mx-auto space-y-6">
 
         <div class="flex justify-between items-center bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-md">
             <div>
                 <h1 class="text-2xl font-black text-white tracking-wide truncate">EmberCore Hintergrund-Dienste</h1>
-                <p class="text-sm text-gray-500 font-mono mt-1">Version: <span class="text-gray-400">{{ store.systemInfo.version }}</span></p>
+                <p class="text-sm text-gray-500 font-mono mt-1">Version: <span class="text-gray-400">{{ store.systemInfo?.version || 'Lade...' }}</span></p>
             </div>
 
             <div class="flex items-center gap-3">
@@ -36,7 +38,7 @@ export default {
                             <p class="text-sm font-bold text-white">Haupt-Prozess (EmberCore)</p>
                             <p class="text-[10px] text-gray-500">FastAPI & Background Tasks</p>
                         </div>
-                        <span class="text-green-400 font-mono text-sm font-bold">Aktiv (PID: {{ store.systemServiceStats.main_pid || '?' }})</span>
+                        <span class="text-green-400 font-mono text-sm font-bold">Aktiv (PID: {{ store.systemServiceStats?.main_pid || '?' }})</span>
                     </div>
 
                     <div class="flex items-center justify-between p-3 rounded-lg border border-gray-800 bg-gray-900/50">
@@ -44,7 +46,7 @@ export default {
                             <p class="text-sm font-bold text-white">Watchdog-Daemon</p>
                             <p class="text-[10px] text-gray-500">Hang-Detection & OS Recovery</p>
                         </div>
-                        <span :class="store.systemServiceStats.watchdog_active ? 'text-green-400' : 'text-red-500'" class="font-mono text-sm font-bold">{{ store.systemServiceStats.watchdog_active ? 'Aktiv' : 'Fehlt' }}</span>
+                        <span :class="store.systemServiceStats?.watchdog_active ? 'text-green-400' : 'text-red-500'" class="font-mono text-sm font-bold">{{ store.systemServiceStats?.watchdog_active ? 'Aktiv' : 'Fehlt' }}</span>
                     </div>
                 </div>
 
@@ -81,18 +83,18 @@ export default {
             <div class="bg-gray-950 p-6 rounded-xl border border-gray-900 shadow-xl space-y-5 flex flex-col justify-between">
                 <div>
                     <h3 class="text-sm font-bold text-white uppercase tracking-wider border-b border-gray-900 pb-2">🖥️ OS Background Service</h3>
-                    <p class="text-xs text-gray-400 mt-3">Registriert EmberCore nativ im Betriebssystem (als <span class="font-bold text-orange-400">{{ store.systemServiceStats.os === 'Linux' ? 'Systemd Daemon' : 'Windows Service' }}</span>). EmberCore startet dann automatisch beim Server-Boot, noch bevor sich ein Benutzer anmeldet.</p>
+                    <p class="text-xs text-gray-400 mt-3">Registriert EmberCore nativ im Betriebssystem (als <span class="font-bold text-orange-400">{{ store.systemServiceStats?.os === 'Linux' ? 'Systemd Daemon' : 'Windows Service' }}</span>). EmberCore startet dann automatisch beim Server-Boot, noch bevor sich ein Benutzer anmeldet.</p>
                     <div class="mt-4 flex items-center gap-3">
                         <span class="text-sm text-gray-400">Dienst-Status:</span>
-                        <span v-if="!store.systemServiceStats.is_installed" class="px-2 py-1 rounded bg-gray-900 border border-gray-800 text-xs font-bold text-gray-500">Nicht Installiert</span>
-                        <span v-else-if="store.systemServiceStats.is_running" class="px-2 py-1 rounded bg-green-900/30 border border-green-800/50 text-xs font-bold text-green-400 animate-pulse">Running</span>
+                        <span v-if="!store.systemServiceStats?.is_installed" class="px-2 py-1 rounded bg-gray-900 border border-gray-800 text-xs font-bold text-gray-500">Nicht Installiert</span>
+                        <span v-else-if="store.systemServiceStats?.is_running" class="px-2 py-1 rounded bg-green-900/30 border border-green-800/50 text-xs font-bold text-green-400 animate-pulse">Running</span>
                         <span v-else class="px-2 py-1 rounded bg-red-900/30 border border-red-800/50 text-xs font-bold text-red-400">Stopped</span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3 pt-4">
-                    <button v-if="!store.systemServiceStats.is_installed" @click="api.installService()" :disabled="store.isActionLoading" class="col-span-2 bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">Als Service Installieren</button>
+                    <button v-if="!store.systemServiceStats?.is_installed" @click="api.installService()" :disabled="store.isActionLoading" class="col-span-2 bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">Als Service Installieren</button>
                     <template v-else>
-                        <button v-if="!store.systemServiceStats.is_running" @click="api.startService()" :disabled="store.isActionLoading" class="bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">▶️ Starten</button>
+                        <button v-if="!store.systemServiceStats?.is_running" @click="api.startService()" :disabled="store.isActionLoading" class="bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">▶️ Starten</button>
                         <button v-else @click="api.stopService()" :disabled="store.isActionLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">⏹️ Stoppen</button>
                         <button @click="api.uninstallService()" :disabled="store.isActionLoading" class="bg-gray-800 hover:bg-red-900/40 border border-gray-700 hover:border-red-800 hover:text-red-400 text-gray-300 text-sm font-bold py-2.5 rounded-lg transition shadow-md cursor-pointer">Deinstallieren</button>
                     </template>
@@ -102,10 +104,10 @@ export default {
             <div class="col-span-1 md:col-span-2 bg-gray-950 p-6 rounded-xl border border-gray-900 shadow-xl flex flex-col h-96">
                 <p class="text-xs text-gray-500 uppercase font-bold tracking-wider border-b border-gray-900 pb-2 mb-4 flex justify-between items-center flex-shrink-0">
                     <span>Versions-Historie</span>
-                    <span class="font-mono text-orange-400 lowercase font-normal hidden sm:inline">CPU: {{ store.systemServiceStats.cpu_percent }}% | RAM: {{ store.systemServiceStats.ram_mb }}MB | UP: {{ formatUptime(store.systemServiceStats.uptime_seconds) }}</span>
+                    <span class="font-mono text-orange-400 lowercase font-normal hidden sm:inline">CPU: {{ store.systemServiceStats?.cpu_percent || 0 }}% | RAM: {{ store.systemServiceStats?.ram_mb || 0 }}MB | UP: {{ formatUptime(store.systemServiceStats?.uptime_seconds || 0) }}</span>
                 </p>
                 <div class="overflow-y-auto pr-2 space-y-4 flex-1">
-                    <div v-for="(release, index) in store.systemInfo.history" :key="index" class="space-y-2 pb-4 border-b border-gray-900/50 last:border-0">
+                    <div v-for="(release, index) in store.systemInfo?.history || []" :key="index" class="space-y-2 pb-4 border-b border-gray-900/50 last:border-0">
                         <div class="flex justify-between items-center"><span :class="index === 0 ? 'text-orange-400 font-bold' : 'text-gray-500 font-medium'" class="text-sm font-mono">{{ release.version }}</span><span class="text-[10px] text-gray-600">{{ release.build_date }}</span></div>
                         <ul class="text-sm space-y-1"><li v-for="(log, i) in release.changelog" :key="i" class="flex gap-2"><span :class="index === 0 ? 'text-orange-500' : 'text-gray-700'">▶</span><span :class="index === 0 ? 'text-gray-300' : 'text-gray-500'">{{ log }}</span></li></ul>
                     </div>
@@ -117,7 +119,9 @@ export default {
     `,
     methods: {
         async shutdownEmberCore() {
-            const isConfirmed = await this.api.confirm(
+            // Gefixt: Direkter Zugriff auf 'api', da wir es als ES-Module importiert haben. 
+            // Vermeidet Kontex-Verluste bei 'this' in reinen Vanilla-JS Objekten.
+            const isConfirmed = await api.confirm(
                 "EmberCore beenden",
                 "Möchtest du EmberCore wirklich komplett beenden?\n\nAlle laufenden Gameserver bleiben im Hintergrund aktiv, aber das Panel ist offline."
             );
