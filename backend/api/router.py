@@ -246,37 +246,50 @@ def sync_cluster_mods(cluster_id: str, payload: dict = Body(...)):
     logger.info(f"[*] Cluster '{cluster_id}': {len(unified_mods)} Mods wurden auf {len(cluster_members)} Server synchronisiert.")
     return {"status": "success", "message": "Mods wurden erfolgreich auf alle Cluster-Server gespiegelt! Sie werden beim nächsten Serverstart heruntergeladen."}
 
+@router.get("/clusters/config/sections/{cluster_id}/{plugin_id}")
+def get_cluster_config_sections(cluster_id: str, plugin_id: str):
+    """Liest alle verfügbaren Sektionsüberschriften aus der Master-INI aus."""
+    ini_path = os.path.abspath(os.path.join(DATA_ROOT, plugin_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
+    if not os.path.exists(ini_path):
+        return {"sections": []}
+
+    sections = []
+    try:
+        with open(ini_path, "r", encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    sections.append(stripped[1:-1])
+    except Exception as e:
+        logger.error(f"Fehler beim Lesen der Sektionen: {e}")
+
+    return {"sections": sections}
+
 @router.post("/clusters/config/sync/{cluster_id}")
 def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
-    """
-    Nimmt einen Server als Master-Vorlage und spiegelt dessen Gameplay-
-    und Mod-Einstellungen auf alle anderen Server im Cluster.
-    Sicherheitsrelevante Keys (Ports, Namen) werden geschützt.
-    """
+    """Spiegelt Einstellungen. Unterstützt optional selektive Sektionsfilterung."""
     db = get_clusters_db()
     if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
 
     master_id = payload.get("master_plugin_id")
+    selected_sections = payload.get("selected_sections", []) # NEU: Wenn leer -> Alle Sektionen
     cluster_members = db[cluster_id].get("members", [])
 
     if not master_id or master_id not in cluster_members:
-        return {"status": "error", "message": "Ungültige oder fehlende Master-Server-ID."}
-
+        return {"status": "error", "message": "Ungültige Master-Server-ID."}
     if len(cluster_members) < 2:
-        return {"status": "error", "message": "Es müssen mindestens zwei Server im Cluster sein, um zu synchronisieren."}
+        return {"status": "error", "message": "Mindestens zwei Server benötigt."}
 
-    # Pfad zur Master-INI
     master_ini = os.path.abspath(os.path.join(DATA_ROOT, master_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
     if not os.path.exists(master_ini):
-        return {"status": "error", "message": f"Die Master-Konfigurationsdatei wurde auf dem Quellserver nicht gefunden."}
+        return {"status": "error", "message": "Master-Konfigurationsdatei nicht gefunden."}
 
-    # Kritische Keys, die NIEMALS überschrieben werden dürfen
     KEY_BLACKLIST = {
         "sessionname", "port", "queryport", "rconport", "rconenabled",
         "serveradminpassword", "serverpassword", "spectatorpassword"
     }
 
-    # 1. Master-INI parsen und in Sektionen aufteilen
+    # 1. Master-INI selektiv einlesen
     master_data = {}
     current_section = None
 
@@ -287,64 +300,56 @@ def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
 
             if stripped.startswith("[") and stripped.endswith("]"):
                 current_section = stripped[1:-1]
-                master_data[current_section] = {}
+                # FILTER: Wenn Filter aktiv und Sektion nicht gewählt -> überspringen
+                if selected_sections and current_section not in selected_sections:
+                    current_section = None
+                if current_section and current_section not in master_data:
+                    master_data[current_section] = {}
             elif current_section and "=" in stripped:
                 k, v = stripped.split("=", 1)
-                # Nur hinzufügen, wenn der Key nicht auf der Blacklist steht
                 if k.strip().lower() not in KEY_BLACKLIST:
                     master_data[current_section][k.strip()] = v.strip()
 
-    # 2. Einstellungen auf alle anderen Cluster-Mitglieder übertragen
+    # 2. Auf Ziel-Server schreiben
     target_members = [m for m in cluster_members if m != master_id]
-
     for target_id in target_members:
         target_ini = os.path.abspath(os.path.join(DATA_ROOT, target_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"))
-
-        # Falls die Datei beim Zielserver noch nicht existiert, leere Datei anlegen
         if not os.path.exists(target_ini):
             os.makedirs(os.path.dirname(target_ini), exist_ok=True)
             open(target_ini, 'a').close()
 
-        # Ziel-INI einlesen
         with open(target_ini, "r", encoding="utf-8") as f:
             target_lines = f.readlines()
 
-        # Jede Sektion aus dem Master in die Ziel-INI einpflegen
         for section, kv_pairs in master_data.items():
             section_header = f"[{section}]"
             section_found = any(line.strip() == section_header for line in target_lines)
-
             if not section_found:
                 target_lines.append(f"\n{section_header}\n")
 
             for k, v in kv_pairs.items():
                 in_section = False
                 key_found = False
-
                 for i, line in enumerate(target_lines):
                     line_stripped = line.strip()
                     if line_stripped.startswith("[") and line_stripped != section_header:
                         in_section = False
                     if line_stripped == section_header:
                         in_section = True
-
                     if in_section and line_stripped.lower().startswith(f"{k.lower()}="):
                         target_lines[i] = f"{k}={v}\n"
                         key_found = True
                         break
-
                 if not key_found:
                     for i, line in enumerate(target_lines):
                         if line.strip() == section_header:
                             target_lines.insert(i + 1, f"{k}={v}\n")
                             break
 
-        # Datei sicher abspeichern
         with open(target_ini, "w", encoding="utf-8") as f:
             f.writelines(target_lines)
 
-    logger.info(f"[*] Cluster-Config-Sync abgeschlossen. '{master_id}' hat Einstellungen auf {len(target_members)} Server gespiegelt.")
-    return {"status": "success", "message": f"Gameplay- und Mod-Einstellungen erfolgreich von '{master_id}' auf alle Cluster-Server übertragen!"}
+    return {"status": "success", "message": "Synchronisierung erfolgreich abgeschlossen!"}
 
 # ==========================================
 # HILFSFUNKTIONEN (Helper)

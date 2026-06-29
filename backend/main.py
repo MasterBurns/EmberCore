@@ -1,8 +1,54 @@
-import sys, os, subprocess, platform
+import sys, os, subprocess, platform, urllib.request, webbrowser, psutil, socket
+
+# ==========================================
+# SINGLE INSTANCE DETECTION & AUTO-ATTACH
+# ==========================================
+def enforce_single_instance():
+    """
+    Sucht im System nach einer bereits laufenden EmberCore-Instanz.
+    Wenn gefunden, liest er deren Port aus, öffnet den Browser und beendet sich selbst.
+    """
+    if "--watchdog" in sys.argv or "--service" in sys.argv:
+        return
+
+    # NEU: Prüfe, ob der User "Mehrfach-Instanzen" in den Settings erlaubt hat
+    try:
+        import json
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        settings_path = os.path.join(base_dir, "data", "system", "settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                if json.load(f).get("allow_multiple_instances", False):
+                    return # Check abbrechen! EmberCore darf einen neuen Port belegen.
+    except Exception:
+        pass
+
+    current_pid = os.getpid()
+
+    # 1. Scanne alle Prozesse nach dem EmberCore Bootloader
+    for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if p.info['pid'] == current_pid: continue
+            cmdline = p.info.get('cmdline') or []
+            cmd_str = " ".join(cmdline).lower()
+
+            if ("main.py" in cmd_str or "embercore" in cmd_str) and "--watchdog" not in cmd_str:
+                for check_port in range(8000, 8100, 10):
+                    try:
+                        url = f"http://127.0.0.1:{check_port}/api/system/version"
+                        with urllib.request.urlopen(url, timeout=0.2) as response:
+                            if response.status == 200:
+                                print(f"\n[+] EmberCore läuft bereits im Hintergrund (Port {check_port})!")
+                                print("[*] Öffne dein Dashboard im Browser...")
+                                webbrowser.open(f"http://127.0.0.1:{check_port}")
+                                sys.exit(0)
+                    except Exception:
+                        continue
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
 
 # ==========================================
 # WATCHDOG (Fängt Windows-Fenster Schließungen ab)
-# Wichtig: Muss ganz oben stehen!
 # ==========================================
 def get_launch_command(mode="normal"):
     from core.env import IS_COMPILED
@@ -13,7 +59,7 @@ def get_launch_command(mode="normal"):
     return cmd
 
 if "--watchdog" in sys.argv:
-    import time, urllib.request, psutil
+    import time
     from core.env import EXE_DIR
     try:
         port = int(sys.argv[sys.argv.index("--watchdog") + 1])
@@ -42,22 +88,18 @@ if "--watchdog" in sys.argv:
                 sys.exit(0)
         time.sleep(15)
 
-
 # ==========================================
 # FASTAPI BOOTLOADER
 # ==========================================
-import socket, threading, webbrowser, asyncio, psutil
+import threading, asyncio
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-# 1. Wir importieren unsere neuen sauberen Module
 import core.env as env
 from core.env import ACTIVE_PORT, EXE_DIR, BASE_DIR, logger, sys_config
 from core.scheduler import BackupScheduler
-
-# 2. Wir binden die aufgeteilten API-Routen und Manager ein
 from api.router import router, backup_manager
 
 class CompiledSafeScheduler(BackupScheduler):
@@ -128,7 +170,6 @@ scheduler = CompiledSafeScheduler(base_dir=EXE_DIR, backup_manager=backup_manage
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Background Tasks starten
     from core.update_manager import update_manager
     if hasattr(update_manager, 'prepare_steamcmd'):
         await update_manager.prepare_steamcmd()
@@ -154,7 +195,6 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(game_update_checker_loop())
 
-    # Watchdog Spawner (abgekoppelt)
     def watchdog_spawner():
         if "--service" in sys.argv: return
         wd_running = any("--watchdog" in p.info.get('cmdline', []) for p in psutil.process_iter(['cmdline']) if p.info.get('cmdline'))
@@ -166,7 +206,6 @@ async def lifespan(app: FastAPI):
 
     watchdog_spawner()
 
-    # Browser öffnen
     def open_browser():
         flag_path = os.path.join(EXE_DIR, ".update_reboot")
         if os.path.exists(flag_path):
@@ -179,18 +218,12 @@ async def lifespan(app: FastAPI):
     threading.Timer(1.5, open_browser).start()
     yield
 
-# 3. FastAPI initialisieren
 from core.env import get_current_system_version
 app = FastAPI(title="EmberCore", version=get_current_system_version()["version"], lifespan=lifespan)
-
-# 4. API-Routen mounten
 app.include_router(router)
-
-# 5. Das modulare Vue.js Frontend bereitstellen
 app.mount("/", StaticFiles(directory=os.path.join(BASE_DIR, "static"), html=True), name="static")
 
 def clean_orphaned_watchdogs():
-    """Killt alle alten Watchdogs vor dem Start, um Boot-Loops zu verhindern."""
     import psutil
     current_pid = os.getpid()
     for p in psutil.process_iter(['pid', 'cmdline']):
@@ -204,7 +237,6 @@ def clean_orphaned_watchdogs():
 def main():
     global ACTIVE_PORT
 
-    # NEU: Erst aufräumen, dann Port binden!
     if "--watchdog" not in sys.argv and "--service" not in sys.argv:
         clean_orphaned_watchdogs()
 

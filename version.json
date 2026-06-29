@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.7.3",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "NEU: Cluster Config Sync",
+    "NEU: Bestehenden Instance aufrufen anstatt viele Embercore instancen zu starten"
+  ]
+  },
+  {
   "version": "v0.1.7.2",
   "build_date": "2026-06-28",
   "changelog": [
