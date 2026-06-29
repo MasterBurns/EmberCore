@@ -8,8 +8,9 @@ class BackupManager:
     def __init__(self, base_dir):
         self.base_dir = base_dir
         self.backups_root = os.path.join(self.base_dir, "backups")
+        self.data_root = os.path.join(self.base_dir, "data") # NEU: Hier liegen die EmberCore Configs
         
-        # NEU: Speichert den Live-Status pro Plugin. Format: {"active": True, "percent": 45}
+        # Speichert den Live-Status pro Plugin. Format: {"active": True, "percent": 45}
         self.active_backups = {}
 
     def get_progress(self, plugin_id: str):
@@ -28,6 +29,8 @@ class BackupManager:
         plugin_backup_dir = os.path.join(self.backups_root, plugin_id)
         os.makedirs(plugin_backup_dir, exist_ok=True)
 
+        plugin_data_dir = os.path.join(self.data_root, plugin_id)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"backup_{timestamp}.zip"
         backup_full_path = os.path.join(plugin_backup_dir, backup_filename)
@@ -36,30 +39,44 @@ class BackupManager:
         self.active_backups[plugin_id] = {"active": True, "percent": 0}
 
         # Den rechenintensiven Zip-Vorgang in einen Hintergrund-Thread auslagern!
-        # Dadurch friert FastAPI (und dein Scheduler) nie wieder ein.
         threading.Thread(
             target=self._zip_worker,
-            args=(plugin_id, source_full_path, backup_full_path, plugin_backup_dir, retention_config),
+            args=(plugin_id, source_full_path, plugin_data_dir, backup_full_path, plugin_backup_dir, retention_config),
             daemon=True
         ).start()
 
-        return {"status": "success", "message": "Das Backup wurde im Hintergrund gestartet!"}
+        return {"status": "success", "message": "Das Full-Backup wurde im Hintergrund gestartet!"}
 
-    def _zip_worker(self, plugin_id, source_dir, target_zip, backup_dir, retention_config):
-        """Der Hintergrund-Arbeiter, der Dateien packt und den Fortschritt berechnet."""
+    def _zip_worker(self, plugin_id, game_dir, data_dir, target_zip, backup_dir, retention_config):
+        """Der Hintergrund-Arbeiter, der Savegames UND Configs packt."""
         try:
-            # 1. Zuerst die Gesamtgröße (Bytes) berechnen, um Prozente zu ermitteln
             total_bytes = 0
             files_to_zip = []
-            for root, _, files in os.walk(source_dir):
+
+            # 1. Game Saves sammeln
+            for root, _, files in os.walk(game_dir):
                 for f in files:
                     fp = os.path.join(root, f)
                     if not os.path.islink(fp):
                         size = os.path.getsize(fp)
                         total_bytes += size
-                        files_to_zip.append((fp, os.path.relpath(fp, source_dir), size))
+                        # Virtueller Pfad in der ZIP
+                        arcname = os.path.join("game_save", os.path.relpath(fp, game_dir))
+                        files_to_zip.append((fp, arcname, size))
 
-            # 2. ZIP Datei erstellen und Fortschritt hochzählen
+            # 2. EmberCore Data (Configs, Mods, Startup) sammeln
+            if os.path.exists(data_dir):
+                for root, _, files in os.walk(data_dir):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        if not os.path.islink(fp):
+                            size = os.path.getsize(fp)
+                            total_bytes += size
+                            # Virtueller Pfad in der ZIP
+                            arcname = os.path.join("embercore_data", os.path.relpath(fp, data_dir))
+                            files_to_zip.append((fp, arcname, size))
+
+            # 3. ZIP Datei erstellen und Fortschritt hochzählen
             processed_bytes = 0
             with zipfile.ZipFile(target_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fp, arcname, size in files_to_zip:
@@ -67,31 +84,72 @@ class BackupManager:
                     processed_bytes += size
                     if total_bytes > 0:
                         percent = int((processed_bytes / total_bytes) * 100)
-                        self.active_backups[plugin_id]["percent"] = min(percent, 99) # 99% bis es wirklich komplett fertig ist
+                        self.active_backups[plugin_id]["percent"] = min(percent, 99) 
 
-            # 3. Alte Backups aufräumen (GFS Algorithmus)
+            # 4. Alte Backups aufräumen
             self._enforce_retention(backup_dir, retention_config)
             
         except Exception as e:
             from core.env import logger
             logger.error(f"[-] Fehler beim Backup für {plugin_id}: {e}")
             if os.path.exists(target_zip):
-                os.remove(target_zip) # Defektes ZIP löschen
+                os.remove(target_zip) 
         finally:
-            # Status zurücksetzen, damit das UI wieder freigegeben wird
             self.active_backups[plugin_id] = {"active": False, "percent": 0}
 
     def restore_backup(self, plugin_id: str, server_dir: str, source_rel_path: str, filename: str):
         backup_file_path = os.path.join(self.backups_root, plugin_id, filename)
-        target_dir = os.path.normpath(os.path.join(server_dir, source_rel_path))
+        target_game_dir = os.path.normpath(os.path.join(server_dir, source_rel_path))
+        target_data_dir = os.path.join(self.data_root, plugin_id)
+
         if not os.path.exists(backup_file_path):
             return {"status": "error", "message": "Backup-Datei nicht gefunden."}
+
         try:
-            if os.path.exists(target_dir): shutil.rmtree(target_dir)
-            os.makedirs(target_dir, exist_ok=True)
+            is_new_format = False
             with zipfile.ZipFile(backup_file_path, 'r') as zip_ref:
-                zip_ref.extractall(target_dir)
-            return {"status": "success", "message": f"Backup '{filename}' erfolgreich eingespielt!"}
+                # Prüfen, ob es ein neues Full-Backup (mit Ordnern) ist
+                for name in zip_ref.namelist():
+                    if name.startswith("game_save/") or name.startswith("game_save\\"):
+                        is_new_format = True
+                        break
+
+                if is_new_format:
+                    # Altes Spiel und Configs löschen, damit es 1:1 identisch wird
+                    if os.path.exists(target_game_dir): shutil.rmtree(target_game_dir)
+                    if os.path.exists(target_data_dir): shutil.rmtree(target_data_dir)
+                    os.makedirs(target_game_dir, exist_ok=True)
+                    os.makedirs(target_data_dir, exist_ok=True)
+
+                    for member in zip_ref.infolist():
+                        # Spiel-Savegames wiederherstellen
+                        if member.filename.startswith("game_save/") or member.filename.startswith("game_save\\"):
+                            relative_path = member.filename.split("/", 1)[-1]
+                            if not relative_path: continue
+                            target_path = os.path.join(target_game_dir, relative_path)
+                            if member.is_dir(): os.makedirs(target_path, exist_ok=True)
+                            else:
+                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                with zip_ref.open(member) as source, open(target_path, "wb") as target:
+                                    shutil.copyfileobj(source, target)
+                        
+                        # EmberCore Configs wiederherstellen
+                        elif member.filename.startswith("embercore_data/") or member.filename.startswith("embercore_data\\"):
+                            relative_path = member.filename.split("/", 1)[-1]
+                            if not relative_path: continue
+                            target_path = os.path.join(target_data_dir, relative_path)
+                            if member.is_dir(): os.makedirs(target_path, exist_ok=True)
+                            else:
+                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                with zip_ref.open(member) as source, open(target_path, "wb") as target:
+                                    shutil.copyfileobj(source, target)
+                else:
+                    # Abwärtskompatibilität für Backups aus v0.1.7.x
+                    if os.path.exists(target_game_dir): shutil.rmtree(target_game_dir)
+                    os.makedirs(target_game_dir, exist_ok=True)
+                    zip_ref.extractall(target_game_dir)
+
+            return {"status": "success", "message": f"Full-Backup '{filename}' erfolgreich eingespielt!"}
         except Exception as e:
             return {"status": "error", "message": f"Wiederherstellungs-Fehler: {str(e)}"}
 
