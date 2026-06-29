@@ -4,3 +4,4 @@ psutil
 httpx
 pyyaml
 pydantic
+discord.py

@@ -40,7 +40,9 @@ export const store = reactive({
     isLogViewerOpen: false,
     systemLogData: "Lade Logs...",
     sysConfig: { verbose_logging: false, allow_multiple_instances: false },
-    startupData: { enabled: false, available_maps: [], selected_map: "" }
+    startupData: { enabled: false, available_maps: [], selected_map: "" },
+    discordWizard: { step: 1, appId: '', botToken: '', pairingKey: 'EMBER-' + Math.random().toString(36).substring(2, 10).toUpperCase() },
+    backup_progress: { active: false, percent: 0 }
 });
 
 export const categorizedPlugins = computed(() => {
@@ -210,5 +212,49 @@ export const api = {
     async applyFix(fixType) { store.isActionLoading = true; const res = await fetch(`/api/server/diagnostics/fix/${store.selectedPlugin}/${fixType}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Absturz-Schutz"); store.isActionLoading = false; this.fetchStats(); },
     async createBackup() { await fetch(`/api/server/backup/create/${store.selectedPlugin}`, { method: 'POST' }); this.fetchBackups(); },
     async restoreBackup(filename) { if (!(await this.confirm(`Möchtest du das Backup '${filename}' wirklich einspielen?\n\nAlle aktuellen Fortschritte werden überschrieben!`, "Backup einspielen"))) return; await fetch(`/api/server/backup/restore/${store.selectedPlugin}/${filename}`, { method: 'POST' }); await this.alert("Das Rollback war erfolgreich.", "Erfolg"); },
-    async deleteBackup(filename) { if (!(await this.confirm(`Soll das Backup unwiderruflich gelöscht werden?`, "Archiv löschen"))) return; await fetch(`/api/server/backup/delete/${store.selectedPlugin}/${filename}`, { method: 'DELETE' }); this.fetchBackups(); }
+    async deleteBackup(filename) { if (!(await this.confirm(`Soll das Backup unwiderruflich gelöscht werden?`, "Archiv löschen"))) return; await fetch(`/api/server/backup/delete/${store.selectedPlugin}/${filename}`, { method: 'DELETE' }); this.fetchBackups(); },
+    // NEU: Discord API Methoden
+    async fetchDiscordSettings() {
+        try {
+            const res = await fetch('/api/system/discord');
+            if (res.ok) {
+                const data = await res.json();
+                store.sysConfig.discord_linked = data.discord_linked;
+                store.sysConfig.discord_guild_name = data.discord_guild_name;
+                store.sysConfig.discord_channel_name = data.discord_channel_name;
+            }
+        } catch (e) {}
+    },
+    async saveDiscordSettings(appId, token) {
+        store.isActionLoading = true;
+        try {
+            const payload = { app_id: appId, token: token, pairing_key: store.discordWizard.pairingKey };
+            const res = await fetch('/api/system/discord/setup', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(payload) 
+            });
+            const data = await res.json();
+            if (res.ok) {
+                await this.alert("Der Bot-Prozess wurde gestartet! Gehe jetzt in deinen Discord und gib den /link Befehl ein.", "Bot Online");
+                this.fetchDiscordSettings();
+            } else {
+                await this.alert(data.message || "Setup fehlgeschlagen.", "Fehler");
+            }
+        } catch (e) {
+            await this.alert("Konnte den Bot nicht starten.", "Netzwerkfehler");
+        }
+        store.isActionLoading = false;
+    },
+    async unlinkDiscord() {
+        if (!(await this.confirm("Möchtest du den Bot wirklich stoppen und die Verknüpfung aufheben?", "Discord trennen"))) return;
+        try {
+            await fetch('/api/system/discord/unlink', { method: 'POST' });
+            store.sysConfig.discord_linked = false;
+            store.discordWizard.step = 1; // Wizard zurücksetzen
+            store.discordWizard.appId = '';
+            store.discordWizard.botToken = '';
+            await this.alert("Die Verbindung wurde erfolgreich getrennt.", "Getrennt");
+        } catch(e) {}
+    }
 };

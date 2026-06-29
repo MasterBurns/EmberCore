@@ -1,5 +1,15 @@
 [
   {
+  "version": "v0.1.8.0",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "FIX: Massives Code Refractoring",
+    "NEU: Backup fortschritt",
+    "NEU: V1 Discord Integration + Bot zur Server Verwaltung",
+    "FIX: diverse Code anpassungen um die Performance zu verbessern"
+  ]
+  },
+  {
   "version": "v0.1.7.6",
   "build_date": "2026-06-29",
   "changelog": [

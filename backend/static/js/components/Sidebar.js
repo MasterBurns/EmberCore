@@ -23,6 +23,12 @@ export default {
     Cluster
     </div>
     </button>
+    <button @click="store.currentView = 'discord_integration'" :class="store.currentView === 'discord_integration' ? 'bg-[#5865F2] text-white shadow-md' : 'text-gray-400 hover:bg-gray-800 hover:text-white'" class="w-full text-left px-4 py-3 flex items-center justify-between transition cursor-pointer text-sm font-medium rounded-lg">
+    <div class="flex items-center gap-3">
+        <span>🤖</span> Discord Bot
+    </div>
+    <span v-if="store.sysConfig?.discord_linked" class="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]"></span>
+    </button>
     </div>
     <div class="space-y-5 pt-2 border-t border-gray-900/50">
     <div v-for="(instances, gameName) in categorizedPlugins" :key="gameName" class="space-y-1">

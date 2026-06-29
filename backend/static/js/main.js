@@ -7,14 +7,16 @@ import SystemTab from './components/SystemTab.js';
 import Marketplace from './components/Marketplace.js';
 import ServerTab from './components/ServerTab.js';
 import ClusterManager from './components/ClusterManager.js';
+import DiscordTab from './components/DiscordTab.js';
 
 const App = {
-    components: { Modals, Sidebar, SystemTab, Marketplace, ServerTab, ClusterManager },
+    components: { Modals, Sidebar, SystemTab, Marketplace, ServerTab, ClusterManager, DiscordTab },
     setup() {
         onMounted(() => {
             api.loadSystemInfo();
             api.checkSystemUpdate();
             api.fetchSysConfig();
+            api.fetchDiscordSettings();
             api.loadInstalledPlugins().then(() => {
                 if (store.installedPlugins.length === 0) store.currentView = 'system_status';
             });
@@ -42,6 +44,7 @@ const App = {
     <SystemTab v-if="store.currentView === 'system_status'" />
     <Marketplace v-if="store.currentView === 'marketplace'" />
     <ServerTab v-if="store.currentView === 'server'" />
+    <DiscordTab v-if="store.currentView === 'discord_integration'" />
 
     <ClusterManager v-if="store.currentView === 'cluster_manager'" />
     </main>

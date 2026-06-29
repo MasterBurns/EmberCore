@@ -303,6 +303,16 @@ export default {
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider">📦 Vorhandene Speicherstände</h3>
                             <button @click="api.createBackup()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
                         </div>
+                        <div v-if="store.serverStats?.backup_progress?.active" class="bg-gray-900 border border-gray-800 p-4 rounded-xl mb-4 shadow-inner">
+                            <div class="flex justify-between items-center mb-2">
+                                <h4 class="text-sm font-bold text-orange-400 animate-pulse">Backup wird erstellt...</h4>
+                                <span class="text-xs font-mono text-gray-400">{{ store.serverStats.backup_progress.percent }}%</span>
+                            </div>
+                            <div class="w-full bg-gray-950 rounded-full h-2.5 border border-gray-800 overflow-hidden">
+                                <div class="bg-orange-500 h-2.5 rounded-full transition-all duration-500" :style="{ width: store.serverStats.backup_progress.percent + '%' }"></div>
+                            </div>
+                            <p class="text-[10px] text-gray-500 mt-2">Das Komprimieren der Spieldateien läuft im Hintergrund. Du kannst das Panel normal weiter nutzen.</p>
+                        </div>
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="bg-gray-900/40 border-b border-gray-900 text-gray-500 text-[10px] uppercase font-bold">
