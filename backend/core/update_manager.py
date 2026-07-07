@@ -68,6 +68,8 @@ class UpdateManager:
                             if name.startswith(os_prefix) and name.endswith(ext) and "Setup" not in name:
                                 exe_url = asset.get("browser_download_url")
                                 break
+                    elif api_res.status_code in [403, 429]:
+                        return {"status": "error", "message": "GitHub API Rate-Limit erreicht. Bitte später erneut versuchen."}
             except Exception as e:
                 return {"status": "error", "message": f"Fehler bei GitHub API Abfrage: {str(e)}"}
 
@@ -85,52 +87,143 @@ class UpdateManager:
                     else:
                         return {"status": "error", "message": f"Download gescheitert (HTTP {response.status_code})!\nURL: {exe_url}"}
 
+                if not os.access(EXE_DIR, os.W_OK):
+                    return {"status": "error", "message": f"Keine Schreibrechte im Verzeichnis {EXE_DIR}!"}
+
+                try:
+                    if is_linux:
+                        with tarfile.open(archive_path, 'r:gz') as tf: pass
+                    else:
+                        with zipfile.ZipFile(archive_path, 'r') as zf:
+                            if zf.testzip() is not None: raise Exception("ZIP Archiv fehlerhaft")
+                except Exception as e:
+                    if os.path.exists(archive_path): os.remove(archive_path)
+                    return {"status": "error", "message": f"Das heruntergeladene Archiv ist beschädigt: {e}"}
+
                 with open(flag_path, "w") as f: f.write("1")
 
                 if is_linux:
                     script_path = os.path.join(EXE_DIR, "update_worker.sh")
+                    log_file = os.path.join(EXE_DIR, "updater_log.txt")
                     with open(script_path, "w", encoding="utf-8") as f:
                         f.write("#!/bin/bash\n")
+                        f.write(f"exec > >(tee -a '{log_file}') 2>&1\n")
+                        f.write("echo '[EmberCore Updater] Starte Update...'\n")
                         f.write("sleep 2\n")
-                        f.write(f"tar -xzf '{archive_path}' -C '{EXE_DIR}'\n")
+                        f.write("echo '[EmberCore Updater] Erstelle Notfall-Backup...'\n")
+                        f.write(f"backup_dir='{EXE_DIR}/updater_backup'\n")
+                        f.write("rm -rf \"$backup_dir\"; mkdir -p \"$backup_dir\"\n")
+                        f.write(f"cp '{current_exe_path}' \"$backup_dir/\"\n")
+                        f.write(f"if ! tar -xzf '{archive_path}' -C '{EXE_DIR}'; then\n")
+                        f.write("    echo '[EmberCore Updater] Entpacken mit tar fehlgeschlagen. Versuche Deep-Fallback (Python tarfile)...'\n")
+                        f.write(f"    if ! python3 -c \"import tarfile; tarfile.open('{archive_path}', 'r:gz').extractall('{EXE_DIR}')\"; then\n")
+                        f.write("        echo '[EmberCore Updater] KRITISCHER FEHLER: Entpacken final gescheitert. Abbruch.'\n")
+                        f.write(f"        rm -f '{archive_path}'\n")
+                        if "--service" not in sys.argv:
+                            f.write(f"        nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
+                        f.write(f"        rm -f '{script_path}'\n")
+                        f.write("        exit 1\n")
+                        f.write("    fi\n")
+                        f.write("fi\n")
+                        f.write("echo '[EmberCore Updater] Entpacken erfolgreich.'\n")
                         f.write(f"rm -f '{archive_path}'\n")
                         if "--service" not in sys.argv:
+                            f.write(f"echo '[EmberCore Updater] Starte Anwendung neu...'\n")
                             f.write(f"nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
+                        
+                        f.write("echo '[EmberCore Updater] Warte 15 Sekunden auf Health-Check...'\n")
+                        f.write("sleep 15\n")
+                        f.write("is_running=false\n")
+                        if "--service" in sys.argv:
+                            f.write("if systemctl is-active --quiet embercore.service; then is_running=true; fi\n")
+                        else:
+                            f.write(f"if pgrep -f '{os.path.basename(current_exe_path)}' > /dev/null; then is_running=true; fi\n")
+                        f.write("if [ \"$is_running\" = false ]; then\n")
+                        f.write("    echo '[EmberCore Updater] KRITISCHER FEHLER: Neue Version läuft nicht! Führe ROLLBACK durch...'\n")
+                        f.write(f"    cp \"$backup_dir/$(basename '{current_exe_path}')\" '{current_exe_path}'\n")
+                        f.write("    echo '[EmberCore Updater] Rollback abgeschlossen.'\n")
+                        if "--service" not in sys.argv:
+                            f.write(f"    nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
+                        f.write("else\n")
+                        f.write("    echo '[EmberCore Updater] Health-Check OK. Update erfolgreich abgeschlossen.'\n")
+                        f.write("fi\n")
                         f.write(f"rm -f '{script_path}'\n")
                     os.chmod(script_path, 0o755)
                     subprocess.Popen(["bash", script_path], cwd=EXE_DIR, start_new_session=True)
                 else:
-                    batch_path = os.path.join(EXE_DIR, "update_worker.bat")
-                    with open(batch_path, "w", encoding="ascii") as f:
-                        f.write("@echo off\n")
-                        f.write("echo [EmberCore Updater] Warte auf Beendigung des Hauptprozesses...\n")
-                        f.write("timeout /t 2 /nobreak > nul\n")
-                        
-                        f.write("echo [EmberCore Updater] Beende Dienste und blockierende Prozesse...\n")
-                        f.write("net stop EmberCore > nul 2>&1\n")
-                        f.write("sc stop EmberCore > nul 2>&1\n")
-                        f.write("timeout /t 2 /nobreak > nul\n")
-                        
-                        # FIX: Normaler Kill statt Tree-Kill, damit der Updater-Prozess überlebt
-                        f.write("echo [EmberCore Updater] Raeume Zombie-Prozesse ab...\n")
-                        f.write("taskkill /F /IM EmberCore.exe > nul 2>&1\n")
-                        f.write("taskkill /F /IM EmberCoreService.exe > nul 2>&1\n")
-                        f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
-                        f.write("timeout /t 3 /nobreak > nul\n")
-                        
-                        f.write("echo [EmberCore Updater] Entpacke neues Update...\n")
-                        f.write(f"powershell -command \"Expand-Archive -Force '{archive_path}' '{EXE_DIR}'\" > nul 2>&1\n")
-                        f.write(f"del /f /q \"{archive_path}\"\n")
-                        
-                        f.write("echo [EmberCore Updater] Starte System neu...\n")
+                    ps_path = os.path.join(EXE_DIR, "update_worker.ps1")
+                    log_file = os.path.join(EXE_DIR, "updater_log.txt")
+                    exe_name_no_ext = os.path.splitext(os.path.basename(current_exe_path))[0]
+                    with open(ps_path, "w", encoding="utf-8") as f:
+                        f.write(f"$ErrorActionPreference = 'Stop'\n")
+                        f.write(f"$LogFile = '{log_file}'\n")
+                        f.write("Function Log($msg) { Add-Content -Path $LogFile -Value \"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg\" }\n\n")
+                        f.write("Log 'Starte Update...'\n")
+                        f.write("Start-Sleep -Seconds 2\n\n")
+                        f.write("Log 'Beende Dienste...'\n")
+                        f.write("Stop-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
+                        f.write("Start-Sleep -Seconds 2\n\n")
+                        f.write("Log 'Beende Prozesse...'\n")
+                        f.write("Stop-Process -Name 'EmberCore' -Force -ErrorAction SilentlyContinue | Out-Null\n")
+                        f.write("Stop-Process -Name 'EmberCoreService' -Force -ErrorAction SilentlyContinue | Out-Null\n")
+                        f.write(f"Stop-Process -Name '{exe_name_no_ext}' -Force -ErrorAction SilentlyContinue | Out-Null\n")
+                        f.write("Start-Sleep -Seconds 3\n\n")
+                        f.write("Log 'Erstelle Notfall-Backup...'\n")
+                        f.write(f"$backupDir = Join-Path '{EXE_DIR}' 'updater_backup'\n")
+                        f.write("if (Test-Path $backupDir) { Remove-Item $backupDir -Recurse -Force }\n")
+                        f.write("New-Item -ItemType Directory -Force -Path $backupDir | Out-Null\n")
+                        f.write(f"Copy-Item -Path '{current_exe_path}' -Destination $backupDir -Force\n\n")
+                        f.write("Log 'Entpacke Update...'\n")
+                        f.write("try {\n")
+                        f.write(f"    Expand-Archive -Path '{archive_path}' -DestinationPath '{EXE_DIR}' -Force\n")
+                        f.write("    Log 'Entpacken erfolgreich.'\n")
+                        f.write("} catch {\n")
+                        f.write("    Log \"Expand-Archive fehlgeschlagen: $_. Versuche Deep-Fallback (.NET ZipFile)...\"\n")
+                        f.write("    try {\n")
+                        f.write("        Add-Type -AssemblyName System.IO.Compression.FileSystem\n")
+                        f.write(f"        [System.IO.Compression.ZipFile]::ExtractToDirectory('{archive_path}', '{EXE_DIR}', $true)\n")
+                        f.write("        Log 'Deep-Fallback Entpacken erfolgreich.'\n")
+                        f.write("    } catch {\n")
+                        f.write("        Log \"KRITISCHER FEHLER: Entpacken final gescheitert: $_\"\n")
+                        f.write(f"        Remove-Item -Path '{archive_path}' -Force\n")
+                        f.write("        Log 'Abbruch. Starte alte Version...'\n")
                         if "--service" in sys.argv:
-                            f.write(f"sc start EmberCore > nul 2>&1\n")
+                            f.write("        Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
                         else:
-                            f.write(f"start \"\" \"{current_exe_path}\" {' '.join(sys.argv[1:])}\n")
-                        f.write("del \"%~f0\"\n")
+                            f.write(f"        Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                        f.write("        Remove-Item -Path $PSCommandPath -Force\n")
+                        f.write("        exit\n")
+                        f.write("    }\n")
+                        f.write("}\n")
+                        f.write(f"Remove-Item -Path '{archive_path}' -Force\n\n")
+                        f.write("Log 'Starte System neu...'\n")
+                        if "--service" in sys.argv:
+                            f.write("Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
+                        else:
+                            f.write(f"Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                        f.write("\nLog 'Warte 15 Sekunden auf Health-Check...'\n")
+                        f.write("Start-Sleep -Seconds 15\n")
+                        f.write("$isRunning = $false\n")
+                        if "--service" in sys.argv:
+                            f.write("$svc = Get-Service -Name 'EmberCore' -ErrorAction SilentlyContinue\n")
+                            f.write("if ($svc -and $svc.Status -eq 'Running') { $isRunning = $true }\n")
+                        else:
+                            f.write(f"$proc = Get-Process -Name '{exe_name_no_ext}' -ErrorAction SilentlyContinue\n")
+                            f.write("if ($proc) { $isRunning = $true }\n")
+                        f.write("if (-not $isRunning) {\n")
+                        f.write("    Log 'KRITISCHER FEHLER: Neue Version läuft nicht! Führe ROLLBACK durch...'\n")
+                        f.write(f"    Copy-Item -Path (Join-Path $backupDir '{os.path.basename(current_exe_path)}') -Destination '{current_exe_path}' -Force\n")
+                        f.write("    Log 'Rollback abgeschlossen. Starte alte Version...'\n")
+                        if "--service" in sys.argv:
+                            f.write("    Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
+                        else:
+                            f.write(f"    Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                        f.write("} else {\n")
+                        f.write("    Log 'Health-Check OK. Update erfolgreich abgeschlossen.'\n")
+                        f.write("}\n")
+                        f.write("Remove-Item -Path $PSCommandPath -Force\n")
                     
-                    # Batch-Datei komplett losgelöst vom Hauptprozess starten
-                    subprocess.Popen([batch_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0)
+                    subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0)
 
                 async def kill_switch():
                     await asyncio.sleep(1.0)

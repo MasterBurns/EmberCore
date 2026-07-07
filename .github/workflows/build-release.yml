@@ -42,7 +42,7 @@ jobs:
       shell: pwsh
       run: |
         if (Test-Path "dist\EmberCore.exe") {
-            Compress-Archive -Path dist\EmberCore.exe -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
+            Compress-Archive -Path dist\EmberCore.exe, EmergencyUpdater.bat -DestinationPath EmberCore_Windows_${{ github.ref_name }}.zip
         } else {
             Write-Error "EmberCore.exe nicht gefunden in dist!"
             exit 1
@@ -71,6 +71,7 @@ jobs:
         Source: "backend\static\*"; DestDir: "{app}\static"; Flags: recursesubdirs
         Source: "backend\dev_plugins\*"; DestDir: "{app}\dev_plugins"; Flags: recursesubdirs
         Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
+        Source: "EmergencyUpdater.bat"; DestDir: "{app}"; Flags: ignoreversion
         
         [Icons]
         Name: "{autoprograms}\EmberCore"; Filename: "{app}\EmberCore.exe"

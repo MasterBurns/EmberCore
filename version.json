@@ -1,5 +1,15 @@
 [
   {
+  "version": "v0.1.8.2",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FEATURE: Standalone Windows Emergency Updater (EmergencyUpdater.bat)",
+    "FEATURE: Deep-Fallback Entpackungs-Methode für Windows und Linux Updates hinzugefügt",
+    "FEATURE: Automatischer Health-Check und Rollback-Mechanismus für fehlgeschlagene Updates",
+    "FIX: Vor dem Update wird auf Schreibrechte und GitHub Rate-Limits geprüft"
+  ]
+  },
+  {
   "version": "v0.1.8.1",
   "build_date": "2026-07-07",
   "changelog": [
