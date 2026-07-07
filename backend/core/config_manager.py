@@ -79,7 +79,13 @@ class ConfigManager:
                         migrated = True
 
                 if "config_meta" in global_manifest and "fields" in global_manifest["config_meta"]:
-                    if "config_meta" not in local_manifest: local_manifest["config_meta"] = {"fields": []}
+                    if "config_meta" not in local_manifest:
+                        local_manifest["config_meta"] = {"fields": [], "file_path": global_manifest["config_meta"].get("file_path", "")}
+                        migrated = True
+                    elif "file_path" not in local_manifest["config_meta"] and "file_path" in global_manifest["config_meta"]:
+                        local_manifest["config_meta"]["file_path"] = global_manifest["config_meta"]["file_path"]
+                        migrated = True
+                        
                     local_keys = {f["key"] for f in local_manifest["config_meta"].get("fields", [])}
                     for field in global_manifest["config_meta"]["fields"]:
                         if field["key"] not in local_keys:

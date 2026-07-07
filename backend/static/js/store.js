@@ -138,6 +138,7 @@ export const api = {
         store.serverTab = "status"; 
         store.serverStats.disk = null; 
         store.consoleLogs = []; 
+        store.configData = { enabled: false, fields: [], unknown_fields: [], values: {} };
         this.fetchStats(); 
         
         // Map sofort laden
