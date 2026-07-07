@@ -1,5 +1,16 @@
 [
   {
+  "version": "v0.1.8.3",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FIX: Präzisere Prozess-Identifikation für Server, um Verwechslungen beim Port-Scanning zu vermeiden",
+    "FEATURE: Automatisches Port-Auto-Incrementing (+10) bei Belegung durch andere Instanzen",
+    "FEATURE: Developer Mode Schalter eingebaut, um Dev-Testserver in der Sidebar auszublenden",
+    "ENHANCEMENT: Map-Auswahl direkt ins Status-Dashboard (ASA) integriert, um Ersteinrichtung zu vereinfachen",
+    "ENHANCEMENT: Alle aktuellen ASA Maps zur Manifest-Datei hinzugefügt"
+  ]
+  },
+  {
   "version": "v0.1.8.2",
   "build_date": "2026-07-07",
   "changelog": [

@@ -73,7 +73,22 @@ class ServerManager:
                                     proc = psutil.Process(conn.pid)
                                     p_name_check = str(proc.name() or '').lower()
                                     if p_name_check not in ["steamcmd.exe", "embercore.exe", "python.exe"]:
-                                        target_procs[proc.pid] = proc
+                                        matched = False
+                                        try:
+                                            exe = proc.exe()
+                                            if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean): matched = True
+                                        except: pass
+                                        if not matched:
+                                            try:
+                                                cwd = proc.cwd()
+                                                if cwd:
+                                                    cwd_path = os.path.normcase(os.path.realpath(cwd))
+                                                    cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
+                                                    if cwd_path.startswith(server_dir_clean): matched = True
+                                            except: pass
+                                        
+                                        if matched:
+                                            target_procs[proc.pid] = proc
                                 except: pass
                 except: pass
 

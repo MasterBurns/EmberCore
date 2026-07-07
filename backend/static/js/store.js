@@ -42,12 +42,14 @@ export const store = reactive({
     sysConfig: { verbose_logging: false, allow_multiple_instances: false },
     startupData: { enabled: false, available_maps: [], selected_map: "" },
     discordWizard: { step: 1, appId: '', botToken: '', pairingKey: 'EMBER-' + Math.random().toString(36).substring(2, 10).toUpperCase() },
-    backup_progress: { active: false, percent: 0 }
+    backup_progress: { active: false, percent: 0 },
+    devMode: false
 });
 
 export const categorizedPlugins = computed(() => {
     const map = {};
     store.installedPlugins.forEach(p => {
+        if (p.is_dev && !store.devMode) return;
         if (!map[p.game_name]) map[p.game_name] = [];
         map[p.game_name].push(p);
     });
@@ -130,7 +132,19 @@ export const api = {
         } catch (err) {}
     },
     async checkGameUpdate() { store.isActionLoading = true; store.loadingMessage = "Frage Steam-Server nach neuer Version..."; try { const res = await fetch(`/api/server/check-updates/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Update Check"); this.fetchStats(); } catch (e) { await this.alert("Konnte Steam-Server nicht erreichen.", "Netzwerk Fehler"); } store.isActionLoading = false; },
-    selectServer(id) { store.selectedPlugin = id; store.currentView = "server"; store.serverTab = "status"; store.serverStats.disk = null; store.consoleLogs = []; this.fetchStats(); },
+    async selectServer(id) { 
+        store.selectedPlugin = id; 
+        store.currentView = "server"; 
+        store.serverTab = "status"; 
+        store.serverStats.disk = null; 
+        store.consoleLogs = []; 
+        this.fetchStats(); 
+        
+        // Map sofort laden
+        const startRes = await fetch(`/api/server/startup/${store.selectedPlugin}`);
+        if (startRes.ok) store.startupData = await startRes.json();
+        else store.startupData = { enabled: false, available_maps: [], selected_map: "" };
+    },
     openConsoleTab() { store.serverTab = 'console'; this.fetchStats(); },
     async openConfigTab() {
         store.serverTab = 'config'; 
@@ -145,11 +159,11 @@ export const api = {
             }
             store.configData = data;
         }
-
-        // NEU: Map laden
-        const startRes = await fetch(`/api/server/startup/${store.selectedPlugin}`);
-        if (startRes.ok) store.startupData = await startRes.json();
-        else store.startupData = { enabled: false, available_maps: [], selected_map: "" };
+    },
+    async saveMap() {
+        if (store.startupData?.enabled) {
+            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map }) });
+        }
     },
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
     async saveList(lst) { const payload = {}; payload[lst.id] = lst.content; await fetch(`/api/server/lists/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await this.alert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert"); },

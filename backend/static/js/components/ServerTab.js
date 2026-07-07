@@ -45,6 +45,20 @@ export default {
                         <button @click="api.installServer()" :disabled="store.isActionLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded transition cursor-pointer shadow">Jetzt aktualisieren</button>
                     </div>
                     
+                    <div v-if="store.startupData?.enabled" class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-md">
+                        <div class="flex justify-between items-center mb-3">
+                            <h3 class="text-sm font-bold text-orange-500 uppercase tracking-widest flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                Start-Konfiguration
+                            </h3>
+                        </div>
+                        <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Aktive Welt (Map)</label>
+                        <select v-model="store.startupData.selected_map" @change="api.saveMap()" class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none cursor-pointer shadow-sm transition">
+                            <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map">{{ map }}</option>
+                        </select>
+                        <p class="text-[10px] text-gray-500 mt-2">Wird beim nächsten Start des Servers geladen. Savegames sind oft an die Map gebunden.</p>
+                    </div>
+
                     <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <button @click="api.installServer()" :disabled="store.isActionLoading || store.serverStats?.status === 'online'" :class="(store.serverStats?.update_info?.available) ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.5)] border border-orange-400' : 'bg-blue-600 hover:bg-blue-500 border border-transparent'" class="disabled:bg-gray-950 disabled:border-gray-900 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition cursor-pointer text-sm flex flex-col items-center justify-center text-center">
                             <span>{{ (store.serverStats?.update_info?.available) ? '🔄 Update verfügbar' : '📦 Install / Update' }}</span>
@@ -162,7 +176,7 @@ export default {
                             Karten-Auswahl (Map)
                         </h3>
                         <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Aktive Welt</label>
-                        <select v-model="store.startupData.selected_map" class="w-full bg-gray-950 border border-gray-700 hover:border-gray-600 rounded-lg p-2.5 text-sm text-white focus:border-orange-500 outline-none cursor-pointer shadow-sm transition">
+                        <select v-model="store.startupData.selected_map" @change="api.saveMap()" class="w-full bg-gray-950 border border-gray-700 hover:border-gray-600 rounded-lg p-2.5 text-sm text-white focus:border-orange-500 outline-none cursor-pointer shadow-sm transition">
                             <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map">{{ map }}</option>
                         </select>
                         <p class="text-[10px] text-gray-500 mt-2">Änderungen werden erst nach einem Server-Neustart aktiv. Savegames sind oft kartenspezifisch!</p>

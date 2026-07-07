@@ -385,7 +385,7 @@ def get_installed_plugins():
 
                     status = "online" if server_manager.is_server_online(plugin_id) else "offline"
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
-                    installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status})
+                    installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status, "is_dev": is_dev})
                     seen_ids.add(plugin_id)
                 except: pass
     return installed
@@ -429,6 +429,62 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
             with open(manifest_path, "r", encoding="utf-8") as f: manifest = yaml.safe_load(f)
             manifest["id"] = instance_id
             manifest["source_url"] = url if not url.endswith(".zip") else ""
+
+            # === PORT AUTO-INCREMENT LOGIC ===
+            network_meta = manifest.get("network_meta")
+            if network_meta and "ports" in network_meta:
+                used_ports = set()
+                dirs_to_scan = [(DEV_PLUGINS_ROOT, True), (PLUGINS_ROOT, False)]
+                for target_dir, _ in dirs_to_scan:
+                    if not os.path.exists(target_dir): continue
+                    for pid in os.listdir(target_dir):
+                        if pid == instance_id: continue
+                        m_path = os.path.join(target_dir, pid, "manifest.yaml")
+                        if os.path.exists(m_path):
+                            try:
+                                with open(m_path, "r", encoding="utf-8") as mf:
+                                    m_data = yaml.safe_load(mf)
+                                    if m_data and "network_meta" in m_data and "ports" in m_data["network_meta"]:
+                                        for p in m_data["network_meta"]["ports"]:
+                                            used_ports.add(int(p["port"]))
+                            except: pass
+
+                original_ports = [int(p["port"]) for p in network_meta["ports"]]
+                offset = 0
+                while True:
+                    proposed_ports = [p + offset for p in original_ports]
+                    if any(p in used_ports for p in proposed_ports):
+                        offset += 10
+                    else:
+                        break
+                
+                if offset > 0:
+                    logger.info(f"[*] Port-Konflikt erkannt! Iteriere Ports um +{offset} für '{instance_id}'")
+                    # Update network_meta
+                    for idx, p_info in enumerate(network_meta["ports"]):
+                        old_port = p_info["port"]
+                        new_port = old_port + offset
+                        p_info["port"] = new_port
+                    
+                    # Update shutdown rcon port
+                    if "shutdown" in manifest and "rcon" in manifest["shutdown"] and "port" in manifest["shutdown"]["rcon"]:
+                        manifest["shutdown"]["rcon"]["port"] += offset
+                    
+                    # Update default_args
+                    if "default_args" in manifest:
+                        new_args = []
+                        for arg in manifest["default_args"]:
+                            arg_str = str(arg)
+                            for orig_p in original_ports:
+                                arg_str = re.sub(rf'\b{orig_p}\b', str(orig_p + offset), arg_str)
+                            new_args.append(arg_str)
+                        manifest["default_args"] = new_args
+                        
+                    # Also update config_meta default if it matches a port (rare, but good to have)
+                    if "config_meta" in manifest and "fields" in manifest["config_meta"]:
+                        for field in manifest["config_meta"]["fields"]:
+                            if field.get("type") == "number" and field.get("default") in original_ports:
+                                field["default"] += offset
 
             with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
             meta = manifest.get("config_meta")

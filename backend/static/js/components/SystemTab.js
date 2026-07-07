@@ -74,6 +74,17 @@ export default {
                             <div class="w-11 h-6 bg-gray-950 border border-gray-700 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600 after:absolute after:top-0.5 after:left-[2px]"></div>
                         </label>
                     </div>
+                    
+                    <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                        <div>
+                            <p class="text-sm font-bold text-gray-300">Developer Mode</p>
+                            <p class="text-[10px] text-gray-500 mt-0.5">Zeigt Dev-Testserver in der Sidebar.</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input type="checkbox" v-model="store.devMode" class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-950 border border-gray-700 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600 after:absolute after:top-0.5 after:left-[2px]"></div>
+                        </label>
+                    </div>
 
                     <button @click="api.openLogViewer()" class="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold p-2.5 rounded-lg text-xs transition border border-gray-700 cursor-pointer">📄 System-Logbuch ansehen</button>
                 </div>

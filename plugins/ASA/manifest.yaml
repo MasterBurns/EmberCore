@@ -6,7 +6,9 @@ maps:
   - "TheIsland_WP"
   - "ScorchedEarth_WP"
   - "TheCenter_WP"
-  - "Abero_WP"
+  - "Aberration_WP"
+  - "Svartalfheim_WP"
+  - "ClubARK"
 
 # Start-Dateien
 executable_windows: "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
