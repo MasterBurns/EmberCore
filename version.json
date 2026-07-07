@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.8.4",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "HOTFIX: [Errno 2] No such file or directory bei GitHub API Abfrage auf einigen Windows Systemen behoben (SSL Zertifikatsprüfung deaktiviert)"
+  ]
+  },
+  {
   "version": "v0.1.8.3",
   "build_date": "2026-07-07",
   "changelog": [

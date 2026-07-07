@@ -11,7 +11,7 @@ class UpdateManager:
             url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" if is_windows else "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
             try:
                 logger.info("Lade SteamCMD herunter...")
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(verify=False) as client:
                     res = await client.get(url, follow_redirects=True, timeout=60.0)
                     if res.status_code == 200:
                         if is_windows:
@@ -30,7 +30,7 @@ class UpdateManager:
             except: return {"update_available": False}
         else:
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(verify=False) as client:
                     res = await client.get("https://raw.githubusercontent.com/MasterBurns/EmberCore/main/version.json", timeout=5.0)
                     if res.status_code == 200:
                         remote_data = res.json()
@@ -60,7 +60,7 @@ class UpdateManager:
             exe_url = None
 
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(verify=False) as client:
                     api_res = await client.get("https://api.github.com/repos/MasterBurns/EmberCore/releases/latest", timeout=10.0)
                     if api_res.status_code == 200:
                         for asset in api_res.json().get("assets", []):
@@ -80,7 +80,7 @@ class UpdateManager:
             current_exe_path = sys.executable
 
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(verify=False) as client:
                     response = await client.get(exe_url, timeout=60.0, follow_redirects=True)
                     if response.status_code == 200:
                         with open(archive_path, "wb") as f: f.write(response.content)
