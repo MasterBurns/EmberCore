@@ -167,7 +167,17 @@ $btnUpdate.Add_Click({
     Stop-Service -Name "EmberCore" -ErrorAction SilentlyContinue | Out-Null
     Stop-Process -Name "EmberCore" -Force -ErrorAction SilentlyContinue | Out-Null
     Stop-Process -Name "EmberCoreService" -Force -ErrorAction SilentlyContinue | Out-Null
-    Start-Sleep -Seconds 2
+    taskkill /F /IM EmberCore.exe /T 2>&1 | Out-Null
+    
+    Start-Sleep -Seconds 3
+    
+    $exePath = Join-Path $path "EmberCore.exe"
+    if (Test-Path $exePath) {
+        Remove-Item -Path $exePath -Force -ErrorAction SilentlyContinue
+        if (Test-Path $exePath) {
+            Rename-Item -Path $exePath -NewName "EmberCore.exe.old" -Force -ErrorAction SilentlyContinue
+        }
+    }
     
     $tempZip = Join-Path $env:TEMP "EmberCore_Emergency.zip"
     Log "Lade herunter: $($Global:latestVersion) (UI friert kurz ein...)"
