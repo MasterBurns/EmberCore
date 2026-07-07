@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.8.5",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "BUGFIX: EmergencyUpdater bricht Prozesse nun zuverlässiger per taskkill ab",
+    "BUGFIX: UI-Anzeigefehler behoben, bei dem die Konfiguration zwischen Servern nicht korrekt aktualisiert wurde"
+  ]
+  },
+  {
   "version": "v0.1.8.4",
   "build_date": "2026-07-07",
   "changelog": [
