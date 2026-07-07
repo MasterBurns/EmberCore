@@ -92,13 +92,9 @@ class UpdateManager:
                     with open(script_path, "w", encoding="utf-8") as f:
                         f.write("#!/bin/bash\n")
                         f.write("sleep 2\n")
-                        if "--service" in sys.argv:
-                            f.write("systemctl stop embercore.service\n")
                         f.write(f"tar -xzf '{archive_path}' -C '{EXE_DIR}'\n")
                         f.write(f"rm -f '{archive_path}'\n")
-                        if "--service" in sys.argv:
-                            f.write("systemctl start embercore.service\n")
-                        else:
+                        if "--service" not in sys.argv:
                             f.write(f"nohup '{current_exe_path}' {' '.join(sys.argv[1:])} > /dev/null 2>&1 &\n")
                         f.write(f"rm -f '{script_path}'\n")
                     os.chmod(script_path, 0o755)
@@ -115,11 +111,11 @@ class UpdateManager:
                         f.write("sc stop EmberCore > nul 2>&1\n")
                         f.write("timeout /t 2 /nobreak > nul\n")
                         
-                        # FIX: Aggressiver Tree-Kill für ALLE EmberCore Prozesse (Zombies!)
+                        # FIX: Normaler Kill statt Tree-Kill, damit der Updater-Prozess überlebt
                         f.write("echo [EmberCore Updater] Raeume Zombie-Prozesse ab...\n")
-                        f.write("taskkill /F /T /IM EmberCore.exe > nul 2>&1\n")
-                        f.write("taskkill /F /T /IM EmberCoreService.exe > nul 2>&1\n")
-                        f.write(f"taskkill /F /T /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
+                        f.write("taskkill /F /IM EmberCore.exe > nul 2>&1\n")
+                        f.write("taskkill /F /IM EmberCoreService.exe > nul 2>&1\n")
+                        f.write(f"taskkill /F /IM \"{os.path.basename(current_exe_path)}\" > nul 2>&1\n")
                         f.write("timeout /t 3 /nobreak > nul\n")
                         
                         f.write("echo [EmberCore Updater] Entpacke neues Update...\n")

@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.8.1",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FIX: Windows Updater bricht nicht mehr vorzeitig ab (Tree-Kill entfernt)",
+    "FIX: Linux Updater stoppt systemd Dienste nicht mehr manuell (verhindert Permission Fehler)"
+  ]
+  },
+  {
   "version": "v0.1.8.0",
   "build_date": "2026-06-29",
   "changelog": [
