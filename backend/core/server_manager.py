@@ -73,10 +73,14 @@ class ServerManager:
                                     proc = psutil.Process(conn.pid)
                                     p_name_check = str(proc.name() or '').lower()
                                     if p_name_check not in ["steamcmd.exe", "embercore.exe", "python.exe"]:
+                                        server_dir_clean = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
+                                        server_dir_clean = server_dir_clean if server_dir_clean.endswith(os.sep) else server_dir_clean + os.sep
                                         matched = False
                                         try:
                                             exe = proc.exe()
-                                            if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean): matched = True
+                                            if exe:
+                                                exe_path = os.path.normcase(os.path.realpath(exe))
+                                                if exe_path.startswith(server_dir_clean): matched = True
                                         except: pass
                                         if not matched:
                                             try:
@@ -111,7 +115,12 @@ class ServerManager:
                     cwd = p.info.get('cwd')
                     cmdline = p.info.get('cmdline')
 
-                    if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean): matched = True
+                    server_dir_clean = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
+                    server_dir_clean = server_dir_clean if server_dir_clean.endswith(os.sep) else server_dir_clean + os.sep
+
+                    if exe:
+                        exe_path = os.path.normcase(os.path.realpath(exe))
+                        if exe_path.startswith(server_dir_clean): matched = True
                     if not matched and cwd:
                         cwd_path = os.path.normcase(os.path.realpath(cwd))
                         cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
@@ -119,7 +128,7 @@ class ServerManager:
                     if not matched and cmdline:
                         cmd_safe = [str(x) for x in cmdline if x is not None]
                         cmd_str = " ".join(cmd_safe).lower()
-                        if f"servers/{plugin_id}".lower() in cmd_str or f"servers\\{plugin_id}".lower() in cmd_str: matched = True
+                        if f"servers/{plugin_id}/".lower() in cmd_str or f"servers\\{plugin_id}\\".lower() in cmd_str: matched = True
 
                     if matched: target_procs[p.info['pid']] = psutil.Process(p.info['pid'])
                 except: pass

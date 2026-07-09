@@ -58,11 +58,12 @@ class BackupManager:
                 for f in files:
                     fp = os.path.join(root, f)
                     if not os.path.islink(fp):
-                        size = os.path.getsize(fp)
-                        total_bytes += size
-                        # Virtueller Pfad in der ZIP
-                        arcname = os.path.join("game_save", os.path.relpath(fp, game_dir))
-                        files_to_zip.append((fp, arcname, size))
+                        try:
+                            size = os.path.getsize(fp)
+                            total_bytes += size
+                            arcname = os.path.join("game_save", os.path.relpath(fp, game_dir))
+                            files_to_zip.append((fp, arcname, size))
+                        except (PermissionError, OSError): pass
 
             # 2. EmberCore Data (Configs, Mods, Startup) sammeln
             if os.path.exists(data_dir):
@@ -70,21 +71,26 @@ class BackupManager:
                     for f in files:
                         fp = os.path.join(root, f)
                         if not os.path.islink(fp):
-                            size = os.path.getsize(fp)
-                            total_bytes += size
-                            # Virtueller Pfad in der ZIP
-                            arcname = os.path.join("embercore_data", os.path.relpath(fp, data_dir))
-                            files_to_zip.append((fp, arcname, size))
+                            try:
+                                size = os.path.getsize(fp)
+                                total_bytes += size
+                                arcname = os.path.join("embercore_data", os.path.relpath(fp, data_dir))
+                                files_to_zip.append((fp, arcname, size))
+                            except (PermissionError, OSError): pass
 
             # 3. ZIP Datei erstellen und Fortschritt hochzählen
             processed_bytes = 0
             with zipfile.ZipFile(target_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fp, arcname, size in files_to_zip:
-                    zf.write(fp, arcname)
-                    processed_bytes += size
-                    if total_bytes > 0:
-                        percent = int((processed_bytes / total_bytes) * 100)
-                        self.active_backups[plugin_id]["percent"] = min(percent, 99) 
+                    try:
+                        zf.write(fp, arcname)
+                        processed_bytes += size
+                        if total_bytes > 0:
+                            percent = int((processed_bytes / total_bytes) * 100)
+                            self.active_backups[plugin_id]["percent"] = min(percent, 99) 
+                    except (PermissionError, OSError) as e:
+                        from core.env import logger
+                        logger.warning(f"[Backup] Überspringe gesperrte Datei: {fp} ({e})")
 
             # 4. Alte Backups aufräumen
             self._enforce_retention(backup_dir, retention_config)

@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.8.6",
+  "build_date": "2026-07-09",
+  "changelog": [
+    "BUGFIX: Server-Prozesserkennung repariert (verhindert, dass Server mit ähnlichen Namen fälschlicherweise als 'Online' markiert werden)",
+    "BUGFIX: Backups brechen nicht mehr ab, wenn einzelne Dateien (wie z.B. die game.db von Conan Exiles) während des Betriebs gesperrt sind"
+  ]
+  },
+  {
   "version": "v0.1.8.5",
   "build_date": "2026-07-07",
   "changelog": [
