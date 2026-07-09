@@ -490,11 +490,19 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
             meta = manifest.get("config_meta")
             if meta:
                 hostname_key = next((f["key"] for f in meta.get("fields", []) if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
+                desired_dir = os.path.join(DATA_ROOT, instance_id)
+                os.makedirs(desired_dir, exist_ok=True)
+                
+                initial_desired = {}
+                for field in meta.get("fields", []):
+                    if "default" in field:
+                        initial_desired[field["key"]] = field["default"]
+                
                 if hostname_key:
-                    desired_dir = os.path.join(DATA_ROOT, instance_id)
-                    os.makedirs(desired_dir, exist_ok=True)
-                    with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
-                        json.dump({hostname_key: server_name}, df, indent=2)
+                    initial_desired[hostname_key] = server_name
+                    
+                with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
+                    json.dump(initial_desired, df, indent=2)
 
         return {"status": "success", "message": f"Server '{server_name}' erstellt.", "instance_id": instance_id}
     except Exception as e:

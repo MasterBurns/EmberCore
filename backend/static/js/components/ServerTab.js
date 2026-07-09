@@ -53,9 +53,10 @@ export default {
                             </h3>
                         </div>
                         <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Aktive Welt (Map)</label>
-                        <select v-model="store.startupData.selected_map" @change="api.saveMap()" class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none cursor-pointer shadow-sm transition">
-                            <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map">{{ map }}</option>
-                        </select>
+                        <input list="map-options" v-model="store.startupData.selected_map" @change="api.saveMap()" placeholder="Map wählen oder Custom-Map Namen eintippen..." class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none transition shadow-sm">
+                        <datalist id="map-options">
+                            <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map"></option>
+                        </datalist>
                         <p class="text-[10px] text-gray-500 mt-2">Wird beim nächsten Start des Servers geladen. Savegames sind oft an die Map gebunden.</p>
                     </div>
 

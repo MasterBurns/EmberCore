@@ -49,7 +49,7 @@ export const store = reactive({
 export const categorizedPlugins = computed(() => {
     const map = {};
     store.installedPlugins.forEach(p => {
-        if (p.is_dev && !store.devMode) return;
+        if (p.is_dev && !store.sysConfig.dev_mode) return;
         if (!map[p.game_name]) map[p.game_name] = [];
         map[p.game_name].push(p);
     });
