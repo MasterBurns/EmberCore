@@ -118,14 +118,30 @@ export const api = {
     async fetchStats() {
         if (store.currentView === 'system_status') this.fetchServiceStatus();
         if (!store.selectedPlugin || store.currentView !== 'server') return;
+        const currentPlugin = store.selectedPlugin;
         try {
-            const res = await fetch(`/api/server/stats/${store.selectedPlugin}`);
-            if (res.ok) { store.serverStats = await res.json(); this.loadInstalledPlugins(); }
-            if (store.serverStats.status === 'online') { const diagRes = await fetch(`/api/server/diagnostics/${store.selectedPlugin}`); if (diagRes.ok) store.activeDiagnostics = await diagRes.json(); } else { store.activeDiagnostics = []; }
+            const res = await fetch(`/api/server/stats/${currentPlugin}`);
+            if (res.ok) { 
+                const data = await res.json();
+                if (store.selectedPlugin !== currentPlugin) return;
+                store.serverStats = data; 
+                this.loadInstalledPlugins(); 
+            }
+            if (store.serverStats.status === 'online') { 
+                const diagRes = await fetch(`/api/server/diagnostics/${currentPlugin}`); 
+                if (diagRes.ok) {
+                    const diagData = await diagRes.json();
+                    if (store.selectedPlugin === currentPlugin) store.activeDiagnostics = diagData;
+                }
+            } else { 
+                store.activeDiagnostics = []; 
+            }
             if (store.serverTab === 'console' && store.serverStats.status === 'online') {
-                const logRes = await fetch(`/api/server/logs/${store.selectedPlugin}`);
+                const logRes = await fetch(`/api/server/logs/${currentPlugin}`);
                 if (logRes.ok) {
-                    const logData = await logRes.json(); const oldLen = store.consoleLogs.length; store.consoleLogs = logData.logs;
+                    const logData = await logRes.json(); 
+                    if (store.selectedPlugin !== currentPlugin) return;
+                    const oldLen = store.consoleLogs.length; store.consoleLogs = logData.logs;
                     if (logData.logs.length !== oldLen) { setTimeout(() => { const el = document.getElementById('console-output'); if(el) el.scrollTop = el.scrollHeight; }, 50); }
                 }
             }
@@ -141,19 +157,25 @@ export const api = {
         store.configData = { enabled: false, fields: [], unknown_fields: [], values: {} };
         this.fetchStats(); 
         
+        const currentPlugin = store.selectedPlugin;
         // Map sofort laden
-        const startRes = await fetch(`/api/server/startup/${store.selectedPlugin}`);
-        if (startRes.ok) store.startupData = await startRes.json();
+        const startRes = await fetch(`/api/server/startup/${currentPlugin}`);
+        if (startRes.ok) {
+            const startData = await startRes.json();
+            if (store.selectedPlugin === currentPlugin) store.startupData = startData;
+        }
         else store.startupData = { enabled: false, available_maps: [], selected_map: "" };
     },
     openConsoleTab() { store.serverTab = 'console'; this.fetchStats(); },
     async openConfigTab() {
         store.serverTab = 'config'; 
         
+        const currentPlugin = store.selectedPlugin;
         // INI laden
-        const res = await fetch(`/api/server/config/${store.selectedPlugin}`);
+        const res = await fetch(`/api/server/config/${currentPlugin}`);
         if (res.ok) {
             const data = await res.json();
+            if (store.selectedPlugin !== currentPlugin) return;
             if (data.enabled && data.values) {
                 data.fields.forEach(f => { if (f.type === 'boolean') { const val = data.values[f.key]; data.values[f.key] = (val === 1 || val === "1" || String(val).toLowerCase() === "true"); } });
                 if (data.unknown_fields) { data.unknown_fields.forEach(f => { if (f.type === 'boolean') { const val = data.values[f.key]; data.values[f.key] = (val === true || String(val).toLowerCase() === "true"); } }); }
@@ -168,10 +190,10 @@ export const api = {
     },
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
     async saveList(lst) { const payload = {}; payload[lst.id] = lst.content; await fetch(`/api/server/lists/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await this.alert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert"); },
-    async openNetworkTab() { store.serverTab = 'network'; const res = await fetch(`/api/server/network/${store.selectedPlugin}`); if (res.ok) store.networkData = await res.json(); },
+    async openNetworkTab() { store.serverTab = 'network'; const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/network/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.networkData = data; } },
     async triggerNetworkSetup() { store.isActionLoading = true; store.loadingMessage = "Erstelle und sende Firewall/Router Anweisung..."; const res = await fetch(`/api/server/network/setup/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Netzwerk Setup"); store.isActionLoading = false; },
     openModsTab() { store.serverTab = 'mods'; this.fetchMods(); },
-    async fetchMods() { const res = await fetch(`/api/server/mods/${store.selectedPlugin}`); if (res.ok) store.activeMods = await res.json(); },
+    async fetchMods() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/mods/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.activeMods = data; } },
     async addMod() {
         if (!store.newModId.trim()) return;
         store.isActionLoading = true; store.loadingMessage = "Koppele mit Steam Workshop API...";
@@ -181,8 +203,8 @@ export const api = {
     },
     async deleteMod(modId) { if (!(await this.confirm("Möchtest du diese Modifikation wirklich vom Server entfernen?", "Mod löschen"))) return; await fetch(`/api/server/mods/delete/${store.selectedPlugin}/${modId}`, { method: 'DELETE' }); this.fetchMods(); },
     openBackupTab() { store.serverTab = 'backups'; this.fetchBackups(); this.fetchBackupSchedule(); },
-    async fetchBackups() { const res = await fetch(`/api/server/backup/list/${store.selectedPlugin}`); if (res.ok) store.backupList = await res.json(); },
-    async fetchBackupSchedule() { const res = await fetch(`/api/server/backup/schedule/${store.selectedPlugin}`); if (res.ok) { const data = await res.json(); if (!data.schedules) data.schedules = []; if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3}; store.backupSchedule = data; } },
+    async fetchBackups() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/list/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.backupList = data; } },
+    async fetchBackupSchedule() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/schedule/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin !== currentPlugin) return; if (!data.schedules) data.schedules = []; if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3}; store.backupSchedule = data; } },
     async subscribePlugin(plugin) {
         const customName = await this.prompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' Server ein:`, "Mein Server", "z.B. PvE The Island", "Neuen Server installieren");
         if (customName === null || customName.trim() === "") return;
