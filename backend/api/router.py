@@ -1206,15 +1206,24 @@ def save_network(plugin_id: str, data: dict = Body(...)):
                         new_args.append(arg)
             manifest["default_args"] = new_args
             
-        # Update shutdown rcon port
+        # Determine shutdown rcon port
+        shutdown_rcon_port = None
         if "shutdown" in manifest and "rcon" in manifest["shutdown"]:
             for p_obj in new_ports:
                 if "rcon" in p_obj.get("desc", "").lower():
-                    manifest["shutdown"]["rcon"]["port"] = p_obj["port"]
+                    shutdown_rcon_port = p_obj["port"]
                     break
 
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
+        override_data = {
+            "ports": new_ports,
+            "default_args": manifest.get("default_args", []),
+            "shutdown_rcon_port": shutdown_rcon_port
+        }
+        
+        override_dir = os.path.join(DATA_ROOT, plugin_id)
+        os.makedirs(override_dir, exist_ok=True)
+        with open(os.path.join(override_dir, "network_override.json"), "w", encoding="utf-8") as f:
+            json.dump(override_data, f, indent=4)
             
         return {"status": "success", "message": "Netzwerk-Ports erfolgreich aktualisiert."}
     except Exception as e:

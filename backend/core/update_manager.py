@@ -198,7 +198,7 @@ class UpdateManager:
                         if "--service" in sys.argv:
                             f.write("        Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
                         else:
-                            f.write(f"        Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                            f.write(f"        Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
                         f.write("        Remove-Item -Path $PSCommandPath -Force\n")
                         f.write("        exit\n")
                         f.write("    }\n")
@@ -208,7 +208,7 @@ class UpdateManager:
                         if "--service" in sys.argv:
                             f.write("Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
                         else:
-                            f.write(f"Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                            f.write(f"Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
                         f.write("\nLog 'Warte 15 Sekunden auf Health-Check...'\n")
                         f.write("Start-Sleep -Seconds 15\n")
                         f.write("$isRunning = $false\n")
@@ -225,13 +225,14 @@ class UpdateManager:
                         if "--service" in sys.argv:
                             f.write("    Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
                         else:
-                            f.write(f"    Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}'\n")
+                            f.write(f"    Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
                         f.write("} else {\n")
                         f.write("    Log 'Health-Check OK. Update erfolgreich abgeschlossen.'\n")
                         f.write("}\n")
                         f.write("Remove-Item -Path $PSCommandPath -Force\n")
                     
-                    subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_path], cwd=EXE_DIR, creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0)
+                    flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if platform.system() == "Windows" else 0
+                    subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_path], cwd=EXE_DIR, creationflags=flags)
 
                 async def kill_switch():
                     await asyncio.sleep(1.0)

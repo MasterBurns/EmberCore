@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.16",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FIX: (WICHTIG) Der Port-Reset nach Updates (bzw. allgemeine Datenverluste in manifest.yaml) wurde durch eine Architekturänderung behoben. Netzwerk-Einstellungen werden nun separat im Daten-Ordner (network_override.json) gesichert und sind update-resistent.",
+    "FIX: (WICHTIG) Der In-App Updater unter Windows schließt die App nun nicht mehr ohne sie neu zu starten. Der Update-Prozess wurde komplett abgekoppelt (Detached Process) und startet EmberCore danach wieder zuverlässig samt GUI."
+  ]
+  },
+  {
   "version": "v0.1.9.15",
   "build_date": "2026-07-10",
   "changelog": [

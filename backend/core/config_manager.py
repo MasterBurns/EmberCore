@@ -96,6 +96,22 @@ class ConfigManager:
                     with open(live_path, "w", encoding="utf-8") as f: yaml.dump(local_manifest, f, allow_unicode=True, default_flow_style=False)
             except Exception as e: logger.error(f"[Schema Sync] Fehler: {e}")
 
+        # Dynamically merge network_override.json
+        import json
+        override_file = os.path.join(DATA_ROOT, plugin_id, "network_override.json")
+        if os.path.exists(override_file):
+            try:
+                with open(override_file, "r", encoding="utf-8") as f:
+                    override_data = json.load(f)
+                    if "ports" in override_data and "network_meta" in local_manifest:
+                        local_manifest["network_meta"]["ports"] = override_data["ports"]
+                    if "default_args" in override_data:
+                        local_manifest["default_args"] = override_data["default_args"]
+                    if "shutdown_rcon_port" in override_data and override_data["shutdown_rcon_port"] and "shutdown" in local_manifest and "rcon" in local_manifest["shutdown"]:
+                        local_manifest["shutdown"]["rcon"]["port"] = override_data["shutdown_rcon_port"]
+            except Exception as e:
+                logger.error(f"[ConfigManager] Fehler beim Laden von network_override.json: {e}")
+
         return local_manifest
 
     @staticmethod
