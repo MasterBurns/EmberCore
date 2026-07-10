@@ -3,7 +3,7 @@ import os
 import json
 import httpx
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 from core.env import logger, DATA_ROOT
@@ -59,6 +59,9 @@ class DiscordManager:
                 logger.info(f"[*] {len(synced)} Slash-Commands mit Discord synchronisiert (Instant-Sync aktiv).")
             except Exception as e:
                 logger.error(f"Fehler beim Sync der Discord-Commands: {e}")
+                
+            if not dashboard_updater.is_running():
+                dashboard_updater.start()
 
         @self.bot.event
         async def on_guild_join(guild):
@@ -106,7 +109,7 @@ class DiscordManager:
                 await interaction.response.send_message("❌ Dieser Kanal ist nicht autorisiert.", ephemeral=True)
                 return
             
-            await interaction.response.defer() # Wichtig, da API-Calls etwas dauern können
+            await interaction.response.defer(ephemeral=True) # Ephemeral für sauberen Kanal
             from core.env import ACTIVE_PORT
             try:
                 async with httpx.AsyncClient() as client:
@@ -114,16 +117,16 @@ class DiscordManager:
                     servers = res.json() if res.status_code == 200 else []
                     
                     if not servers:
-                        await interaction.followup.send("Es sind aktuell keine Server installiert.")
+                        await interaction.followup.send("Es sind aktuell keine Server installiert.", ephemeral=True)
                         return
                         
                     embed = discord.Embed(title="🎮 EmberCore Server Liste", color=0xE67E22) # EmberCore Orange
                     for s in servers:
                         status_icon = "🟢 Online" if s['status'] == 'online' else "🔴 Offline"
                         embed.add_field(name=f"{s['server_name']}", value=f"ID: `{s['id']}`\nStatus: {status_icon}", inline=False)
-                    await interaction.followup.send(embed=embed)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception as e:
-                await interaction.followup.send(f"❌ Interner API-Fehler: {e}")
+                await interaction.followup.send(f"❌ Interner API-Fehler: {e}", ephemeral=True)
 
         # ---------------------------------------------------------
         # COMMAND: /start
@@ -142,11 +145,11 @@ class DiscordManager:
                     res = await client.post(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/start/{server_id}", timeout=10.0)
                     data = res.json()
                     if data.get("status") == "success":
-                        await interaction.followup.send(f"✅ Start-Befehl für `{server_id}` wurde erfolgreich an das System gesendet!")
+                        await interaction.followup.send(f"✅ <@{interaction.user.id}> hat den Start-Befehl für `{server_id}` gesendet!", delete_after=60)
                     else:
-                        await interaction.followup.send(f"⚠️ Konnte nicht starten: {data.get('message', 'Unbekannter Fehler.')}")
+                        await interaction.followup.send(f"⚠️ Konnte nicht starten: {data.get('message', 'Unbekannter Fehler.')}", delete_after=60)
             except Exception as e:
-                await interaction.followup.send(f"❌ API-Fehler: {e}")
+                await interaction.followup.send(f"❌ API-Fehler: {e}", ephemeral=True)
 
         # ---------------------------------------------------------
         # COMMAND: /stop
@@ -165,11 +168,11 @@ class DiscordManager:
                     res = await client.post(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stop/{server_id}", timeout=20.0)
                     data = res.json()
                     if data.get("status") == "success":
-                        await interaction.followup.send(f"🛑 Server `{server_id}` wird jetzt sicher heruntergefahren!")
+                        await interaction.followup.send(f"🛑 <@{interaction.user.id}> hat den Stopp-Befehl für `{server_id}` gesendet!", delete_after=60)
                     else:
-                        await interaction.followup.send(f"⚠️ Fehler beim Stoppen: {data.get('message')}")
+                        await interaction.followup.send(f"⚠️ Fehler beim Stoppen: {data.get('message')}", delete_after=60)
             except Exception as e:
-                await interaction.followup.send(f"❌ API-Fehler: {e}")
+                await interaction.followup.send(f"❌ API-Fehler: {e}", ephemeral=True)
 
         # ---------------------------------------------------------
         # COMMAND: /status
@@ -181,13 +184,13 @@ class DiscordManager:
                 await interaction.response.send_message("❌ Nicht autorisiert.", ephemeral=True)
                 return
                 
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
             from core.env import ACTIVE_PORT
             try:
                 async with httpx.AsyncClient() as client:
                     res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}", timeout=5.0)
                     if res.status_code != 200:
-                        await interaction.followup.send("❌ Server-ID nicht gefunden.")
+                        await interaction.followup.send("❌ Server-ID nicht gefunden.", ephemeral=True)
                         return
                         
                     data = res.json()
@@ -207,9 +210,90 @@ class DiscordManager:
                     if disk:
                         embed.add_field(name="💾 Festplatte", value=f"{disk.get('server_mb', 0)} MB", inline=False)
                     
-                    await interaction.followup.send(embed=embed)
+                    await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception as e:
-                await interaction.followup.send(f"❌ API-Fehler: {e}")
+                await interaction.followup.send(f"❌ API-Fehler: {e}", ephemeral=True)
+
+        # ---------------------------------------------------------
+        # DASHBOARD FEATURE
+        # ---------------------------------------------------------
+        async def generate_dashboard_embed():
+            from core.env import ACTIVE_PORT
+            import datetime
+            embed = discord.Embed(title="🎮 EmberCore Live Dashboard", description="Automatischer Status-Report aller Server", color=0xE67E22)
+            try:
+                async with httpx.AsyncClient() as client:
+                    res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/plugins/installed")
+                    servers = res.json() if res.status_code == 200 else []
+                    if not servers:
+                        embed.description = "Keine Server installiert."
+                        return embed
+                    
+                    for s in servers:
+                        server_id = s['id']
+                        stats_res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}", timeout=2.0)
+                        if stats_res.status_code == 200:
+                            stats = stats_res.json()
+                            is_online = stats.get('status') == 'online'
+                            status_icon = "🟢 Online" if is_online else "🔴 Offline"
+                            cpu = stats.get("cpu_percent", 0)
+                            ram = stats.get("ram_mb", 0)
+                            
+                            val = f"**Status:** {status_icon}"
+                            if is_online: val += f" | **CPU:** {cpu}% | **RAM:** {ram} MB"
+                            embed.add_field(name=f"🖥️ {s['server_name']}", value=val, inline=False)
+            except Exception as e:
+                embed.description = f"❌ API-Fehler: {e}"
+            embed.set_footer(text=f"Letztes Update: {datetime.datetime.now().strftime('%H:%M:%S')} Uhr")
+            return embed
+
+        @tasks.loop(seconds=30)
+        async def dashboard_updater():
+            config = self.load_config()
+            channel_id = config.get("channel_id")
+            msg_id = config.get("dashboard_msg_id")
+            if not channel_id or not msg_id: return
+            
+            try:
+                channel = self.bot.get_channel(channel_id)
+                if not channel: channel = await self.bot.fetch_channel(channel_id)
+                if not channel: return
+                
+                try:
+                    msg = await channel.fetch_message(msg_id)
+                    embed = await generate_dashboard_embed()
+                    await msg.edit(embed=embed)
+                except discord.NotFound:
+                    config["dashboard_msg_id"] = None
+                    self.save_config(config)
+            except Exception as e:
+                pass # Silent fail if rate limited or network issue
+                
+        @self.bot.tree.command(name="dashboard", description="Erstellt ein Live-Dashboard, das sich automatisch aktualisiert.")
+        async def create_dashboard(interaction: discord.Interaction):
+            if not is_authorized(interaction):
+                await interaction.response.send_message("❌ Dieser Kanal ist nicht autorisiert.", ephemeral=True)
+                return
+                
+            await interaction.response.defer(ephemeral=True)
+            config = self.load_config()
+            
+            old_msg_id = config.get("dashboard_msg_id")
+            if old_msg_id:
+                try:
+                    old_msg = await interaction.channel.fetch_message(old_msg_id)
+                    await old_msg.delete()
+                except discord.NotFound: pass
+                except Exception: pass
+            
+            embed = await generate_dashboard_embed()
+            new_msg = await interaction.channel.send(embed=embed)
+            
+            config["dashboard_msg_id"] = new_msg.id
+            self.save_config(config)
+            
+            await interaction.followup.send("✅ Live-Dashboard erfolgreich generiert! Es aktualisiert sich ab sofort automatisch.", ephemeral=True)
+            if not dashboard_updater.is_running(): dashboard_updater.start()
 
         self.is_running = True
         self.bot_task = asyncio.create_task(self.bot.start(token))
