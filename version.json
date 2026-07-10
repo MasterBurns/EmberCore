@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.7",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: Automatischer Build-Prozess repariert (fehlgeschlagene Builds führten dazu, dass Nutzer nicht auf Version >= 0.1.9.3 updaten konnten)",
+    "INFO: Dieses Update enthält alle vorherigen Fixes (AMP-Importer Fortschrittsbalken, Discord-Bot Bugs, CurseForge UI-Integration) nun gebündelt für Tester."
+  ]
+  },
+  {
   "version": "v0.1.9.6",
   "build_date": "2026-07-10",
   "changelog": [

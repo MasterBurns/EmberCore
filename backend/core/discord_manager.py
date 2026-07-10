@@ -45,6 +45,7 @@ class DiscordManager:
         @self.bot.event
         async def on_ready():
             logger.info(f"[*] Discord Bot eingeloggt als {self.bot.user}")
+            try:
                 # Entferne alte Gilden-Kopien (verhindert doppelte Befehle)
                 for guild in self.bot.guilds:
                     try:
