@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.18",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FIX: (ASA) SessionName, MaxPlayers und AdminPassword in Startparametern entfernt, damit die Einstellungen im Config-Tab (GameUserSettings.ini) greifen.",
+    "FEATURE: Interne Web-Konsole hat nun Syntax Highlighting (Erfolge grün, Fehler rot, Warnungen gelb)."
+  ]
+  },
+  {
   "version": "v0.1.9.17",
   "build_date": "2026-07-10",
   "changelog": [

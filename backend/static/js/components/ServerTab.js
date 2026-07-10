@@ -1,7 +1,22 @@
 import { store, api, currentServerData, filteredGroupedConfigFields } from '../store.js';
 
 export default {
-    setup() { return { store, api, currentServerData, filteredGroupedConfigFields }; },
+    setup() { 
+        const formatLog = (text) => {
+            if (!text) return '';
+            let html = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const lower = html.toLowerCase();
+            if (lower.includes('error') || lower.includes('fail') || lower.includes('exception') || lower.includes('critical') || lower.includes('fatal')) {
+                return `<span class="text-red-400">${html}</span>`;
+            } else if (lower.includes('warning') || lower.includes('warn ')) {
+                return `<span class="text-yellow-400">${html}</span>`;
+            } else if (lower.includes('success') || lower.includes('started') || lower.includes('ready') || lower.includes('done') || lower.includes('listening')) {
+                return `<span class="text-green-400">${html}</span>`;
+            }
+            return html;
+        };
+        return { store, api, currentServerData, filteredGroupedConfigFields, formatLog }; 
+    },
     template: `
     <div class="max-w-5xl mx-auto space-y-6">
         
@@ -130,7 +145,7 @@ export default {
                         </div>
                     </div>
                     <div class="flex-1 p-4 overflow-y-auto font-mono text-xs text-gray-300 bg-[#0a0a0a]" id="console-output">
-                        <div v-for="(log, idx) in store.consoleLogs || []" :key="idx" class="whitespace-pre-wrap">{{ log }}</div>
+                        <div v-for="(log, idx) in store.consoleLogs || []" :key="idx" class="whitespace-pre-wrap" v-html="formatLog(log)"></div>
                     </div>
                 </div>
 

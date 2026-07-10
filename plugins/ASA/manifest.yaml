@@ -30,7 +30,7 @@ mods_meta:
 # Standard-Startparameter für ASA
 # TheIsland_WP ist die Standard-Map. Wir aktivieren direkt RCON für den sauberen EmberCore-Shutdown.
 default_args:
-  - "TheIsland_WP?listen?SessionName=EmberCore_ASA?Port=7777?QueryPort=27015?MaxPlayers=20?RCONEnabled=True?RCONPort=27020?ServerAdminPassword=EmberCoreRcon"
+  - "TheIsland_WP?listen?Port=7777?QueryPort=27015?RCONEnabled=True?RCONPort=27020"
   - "-server"
   - "-log"
   - "-NoTransferFromFiltering"
