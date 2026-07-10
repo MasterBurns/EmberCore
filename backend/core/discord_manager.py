@@ -224,6 +224,10 @@ class DiscordManager:
                         return embed
                     
                     for s in servers:
+                        server_name = s.get('server_name', 'Unbekannt')
+                        if '[DEV]' in server_name:
+                            continue
+                            
                         server_id = s['id']
                         stats_res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}?skip_disk=true", timeout=5.0)
                         if stats_res.status_code == 200:
