@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.14",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FIX: (WICHTIG) Unreal Engine Server (wie ARK: SA und Conan Exiles) tauchen nun zuverlässig im Steam-Server-Browser auf. Die Hintergrundausführung von EmberCore blockiert nicht länger die Steam-Netzwerk-Initialisierung der Spiele (CREATE_NO_WINDOW Bug behoben).",
+    "FIX: Fehlende steamclient64.dll wird nun beim Starten automatisch ins richtige Verzeichnis kopiert, falls das Spiel diese für die Steam-API-Verbindung verlangt."
+  ]
+  },
+  {
   "version": "v0.1.9.13",
   "build_date": "2026-07-10",
   "changelog": [

@@ -1,4 +1,4 @@
-import os, psutil, time, platform, subprocess, socket, struct, threading, json
+import os, psutil, time, platform, subprocess, socket, struct, threading, json, shutil
 from collections import deque
 from core.env import SERVERS_ROOT, DATA_ROOT, logger, sys_config
 from core.config_manager import ConfigManager
@@ -159,9 +159,31 @@ class ServerManager:
         if self.is_server_online(plugin_id): return {"status": "error", "message": "Läuft bereits"}
         ConfigManager.apply_desired_config(plugin_id)
         cwd = os.path.dirname(executable_path)
+        
+        # SteamAPI Fix: Unreal Engine / SteamCMD Servers often need steamclient64.dll next to the executable
+        # SteamCMD downloads it to the server root, but the exe is often in Binaries/Win64
+        server_root = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
+        steamclient_src = os.path.join(server_root, "steamclient64.dll")
+        steamclient_dst = os.path.join(cwd, "steamclient64.dll")
+        if os.path.exists(steamclient_src) and not os.path.exists(steamclient_dst):
+            try:
+                shutil.copy2(steamclient_src, steamclient_dst)
+                logger.info(f"[*] Kopiere steamclient64.dll nach {cwd} (Steam Browser Fix)")
+            except Exception as e:
+                logger.error(f"[!] Fehler beim Kopieren von steamclient64.dll: {e}")
+                
         try:
-            flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-            p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1, creationflags=flags)
+            startupinfo = None
+            if platform.system() == "Windows":
+                # DO NOT use CREATE_NO_WINDOW (0x08000000) for Unreal Engine servers!
+                # It breaks Steam Sockets/Networking. Use STARTUPINFO with SW_HIDE instead.
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1, startupinfo=startupinfo)
+            else:
+                p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1)
+            
             self.processes[plugin_id] = p
             self.logs[plugin_id] = deque(maxlen=200)
 
