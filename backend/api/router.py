@@ -413,6 +413,13 @@ def get_installed_plugins():
                 except: pass
     return installed
 
+@router.get("/server/manifest/{plugin_id}")
+def get_server_manifest(plugin_id: str):
+    manifest = ConfigManager.load_manifest(plugin_id)
+    if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
+    return manifest
+
+
 IMPORT_TASKS = {}
 
 def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_dir: str, server_dir: str):

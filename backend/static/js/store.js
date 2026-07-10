@@ -43,7 +43,12 @@ export const store = reactive({
     startupData: { enabled: false, available_maps: [], selected_map: "" },
     discordWizard: { step: 1, appId: '', botToken: '', pairingKey: 'EMBER-' + Math.random().toString(36).substring(2, 10).toUpperCase() },
     backup_progress: { active: false, percent: 0 },
-    devMode: false
+    devMode: false,
+    
+    ampImportTask: null,
+    ampImportPath: "",
+    ampImportMode: "move",
+    pluginManifest: null
 });
 
 export const categorizedPlugins = computed(() => {
@@ -165,6 +170,17 @@ export const api = {
             if (store.selectedPlugin === currentPlugin) store.startupData = startData;
         }
         else store.startupData = { enabled: false, available_maps: [], selected_map: "" };
+
+        // Manifest laden (für UI-Abhängigkeiten wie CurseForge vs Steam)
+        try {
+            const manifestRes = await fetch(`/api/server/manifest/${currentPlugin}`);
+            if (manifestRes.ok) {
+                const manifestData = await manifestRes.json();
+                if (store.selectedPlugin === currentPlugin) store.pluginManifest = manifestData;
+            } else {
+                store.pluginManifest = null;
+            }
+        } catch(e) { store.pluginManifest = null; }
     },
     openConsoleTab() { store.serverTab = 'console'; this.fetchStats(); },
     async openConfigTab() {
