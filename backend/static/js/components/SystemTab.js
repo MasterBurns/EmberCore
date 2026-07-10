@@ -191,14 +191,14 @@ export default {
                             if (statusData.status === 'completed') {
                                 clearInterval(pollInterval);
                                 store.isActionLoading = false;
-                                api.showNotification('✅ Import Erfolgreich', statusData.message, 'success');
+                                api.alert(statusData.message, '✅ Import Erfolgreich');
                                 store.ampImportPath = '';
                                 store.ampImportTask = null; // Reset UI
                                 api.loadInstalledPlugins(); // Refresh servers
                             } else if (statusData.status === 'error') {
                                 clearInterval(pollInterval);
                                 store.isActionLoading = false;
-                                api.showNotification('❌ Import Fehlgeschlagen', statusData.message, 'error');
+                                api.alert(statusData.message, '❌ Import Fehlgeschlagen');
                                 store.ampImportTask = null;
                             }
                         } catch (e) {
@@ -207,11 +207,11 @@ export default {
                     }, 1000);
                 } else {
                     store.isActionLoading = false;
-                    api.showNotification('❌ Import Fehlgeschlagen', data.message, 'error');
+                    api.alert(data.message, '❌ Import Fehlgeschlagen');
                 }
             } catch (e) {
                 store.isActionLoading = false;
-                api.showNotification('❌ Fehler', e.message, 'error');
+                api.alert(e.message, '❌ Fehler');
             }
         },
         async shutdownEmberCore() {

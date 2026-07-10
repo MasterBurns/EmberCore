@@ -1,5 +1,14 @@
 [
   {
+  "version": "v0.1.9.9",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: AMP-Importer Button stürzt nicht mehr lautlos ab, wenn der Pfad ungültig ist (zeigt nun einen sichtbaren Fehler an).",
+    "BUGFIX: Discord Bot startet nach einem Server-Neustart nun automatisch, wenn er bereits eingerichtet ist (verhindert ständige Disconnects).",
+    "FEATURE: Der integrierte System-Updater ist nun genauso robust wie der Emergency Updater (entsperrt/benennt blockierte Dateien vor dem Entpacken um)."
+  ]
+  },
+  {
   "version": "v0.1.9.8",
   "build_date": "2026-07-10",
   "changelog": [

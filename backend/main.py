@@ -176,6 +176,13 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(scheduler.start_loop())
 
+    from core.discord_manager import discord_manager
+    discord_cfg = discord_manager.load_config()
+    if discord_cfg.get("token") and discord_cfg.get("linked"):
+        logger.info("[*] Starte Discord-Bot aus gespeicherter Konfiguration...")
+        # Die Pairing Key ist irrelevant, wenn der Bot bereits verlinkt ist, wir übergeben einen Dummy
+        asyncio.create_task(discord_manager.start_bot(discord_cfg.get("token"), "AUTO-START"))
+
     from api.router import force_check_game_updates
     from core.config_manager import ConfigManager
     async def game_update_checker_loop():
