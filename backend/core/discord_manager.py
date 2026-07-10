@@ -282,13 +282,16 @@ class DiscordManager:
                 except Exception: pass
             
             embed = await generate_dashboard_embed()
-            new_msg = await interaction.channel.send(embed=embed)
-            
-            config["dashboard_msg_id"] = new_msg.id
-            self.save_config(config)
-            
-            await interaction.followup.send("✅ Live-Dashboard erfolgreich generiert! Es aktualisiert sich ab sofort automatisch.", ephemeral=True)
-            if not dashboard_updater.is_running(): dashboard_updater.start()
+            try:
+                new_msg = await interaction.channel.send(embed=embed)
+                config["dashboard_msg_id"] = new_msg.id
+                self.save_config(config)
+                await interaction.followup.send("✅ Live-Dashboard erfolgreich generiert! Es aktualisiert sich ab sofort automatisch.", ephemeral=True)
+                if not dashboard_updater.is_running(): dashboard_updater.start()
+            except discord.Forbidden:
+                await interaction.followup.send("❌ Fehler: Der Bot darf in diesem Kanal keine Nachrichten oder Embeds senden. (Berechtigungen prüfen!)", ephemeral=True)
+            except Exception as e:
+                await interaction.followup.send(f"❌ Fehler beim Senden: {e}", ephemeral=True)
 
         self.is_running = True
         self.bot_task = asyncio.create_task(self.bot.start(token))

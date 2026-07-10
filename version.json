@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.8",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: Discord Bot Absturz ('Die Anwendung reagiert nicht') beim Dashboard-Befehl behoben, falls der Bot keine Schreibrechte im Kanal hat."
+  ]
+  },
+  {
   "version": "v0.1.9.7",
   "build_date": "2026-07-10",
   "changelog": [
