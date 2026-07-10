@@ -1,5 +1,22 @@
 [
   {
+  "version": "v0.1.9.2",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FEATURE: AMP Importer auf asynchrone Background-Tasks umgebaut inkl. Ladebalken für große Server",
+    "FEATURE: Discord-Bot Live-Dashboard (Auto-Updating) integriert",
+    "FEATURE: Discord-Bot Auto-Cleanup (Anti-Spam) für Slash-Commands",
+    "FIX: Discord Slash-Commands Sync-Verzögerung durch Instant-Guild-Push behoben"
+  ]
+  },
+  {
+  "version": "v0.1.9.1",
+  "build_date": "2026-07-09",
+  "changelog": [
+    "AMP Importer & Curseforge Mods"
+  ]
+  },
+  {
   "version": "v0.1.9.0",
   "build_date": "2026-07-09",
   "changelog": [

@@ -413,8 +413,86 @@ def get_installed_plugins():
                 except: pass
     return installed
 
+IMPORT_TASKS = {}
+
+def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_dir: str, server_dir: str):
+    import shutil
+    import os
+    import re
+    import json
+    from core.env import logger, DATA_ROOT
+    
+    try:
+        IMPORT_TASKS[task_id]["message"] = "Berechne Ordnergröße..."
+        
+        # Berechne Gesamtgröße
+        total_size = sum(os.path.getsize(os.path.join(dp, f)) for dp, dn, fn in os.walk(src_dir) for f in fn)
+        copied_size = 0
+        
+        def copy_with_progress(src, dst):
+            nonlocal copied_size
+            shutil.copy2(src, dst)
+            copied_size += os.path.getsize(src)
+            if total_size > 0:
+                progress = int((copied_size / total_size) * 100)
+                IMPORT_TASKS[task_id]["progress"] = min(99, progress)
+                IMPORT_TASKS[task_id]["message"] = f"{'Verschiebe' if mode == 'move' else 'Kopiere'} Dateien... ({min(99, progress)}%)"
+
+        os.makedirs(os.path.dirname(server_dir), exist_ok=True)
+        shutil.copytree(src_dir, server_dir, copy_function=copy_with_progress)
+        
+        # Try to extract mods from AMP config
+        amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
+        mod_ids = set()
+        
+        if os.path.exists(amp_config_path):
+            try:
+                with open(amp_config_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if "mod" in line.lower() and "=" in line:
+                            val = line.split("=", 1)[1].strip()
+                            if re.match(r'^[\d,]+$', val):
+                                for m_id in val.split(','):
+                                    if m_id.strip():
+                                        mod_ids.add(m_id.strip())
+            except Exception as e:
+                logger.error(f"[!] Fehler beim Lesen der AMPConfig.conf: {e}")
+                
+        if mod_ids:
+            mods_db = []
+            for mid in mod_ids:
+                mods_db.append({
+                    "id": mid,
+                    "name": f"Imported Mod ({mid})",
+                    "version": "Auto-Update durch Server"
+                })
+            mods_dir = os.path.join(DATA_ROOT, plugin_id)
+            os.makedirs(mods_dir, exist_ok=True)
+            with open(os.path.join(mods_dir, "mods_db.json"), "w", encoding="utf-8") as f:
+                json.dump(mods_db, f, indent=2)
+            logger.info(f"[*] {len(mods_db)} Mods aus AMP Konfiguration importiert.")
+            
+        if mode == "move":
+            IMPORT_TASKS[task_id]["message"] = "Räume alten Ordner auf..."
+            shutil.rmtree(src_dir, ignore_errors=True)
+
+        IMPORT_TASKS[task_id]["progress"] = 100
+        IMPORT_TASKS[task_id]["status"] = "completed"
+        IMPORT_TASKS[task_id]["message"] = f"Server erfolgreich als '{plugin_id}' importiert!"
+        
+    except Exception as e:
+        logger.error(f"[!] Fehler beim AMP-Import-Task {task_id}: {e}")
+        IMPORT_TASKS[task_id]["status"] = "error"
+        IMPORT_TASKS[task_id]["message"] = f"Fehler: {str(e)}"
+
+@router.get("/system/importer/status/{task_id}")
+async def get_amp_import_status(task_id: str):
+    if task_id not in IMPORT_TASKS:
+        return {"status": "error", "message": "Task nicht gefunden."}
+    return IMPORT_TASKS[task_id]
+
 @router.post("/system/importer/amp")
-async def import_amp_server(data: dict = Body(...)):
+async def import_amp_server(background_tasks: BackgroundTasks, data: dict = Body(...)):
     import shutil
     import time
     
@@ -540,52 +618,21 @@ async def import_amp_server(data: dict = Body(...)):
             else:
                 return {"status": "error", "message": "Konnte ASA Manifest nicht herunterladen."}
                 
-        # Move or Copy the files
-        os.makedirs(os.path.dirname(server_dir), exist_ok=True)
-        if mode == "move":
-            logger.info(f"[*] Verschiebe AMP-Server von {src_dir} nach {server_dir}")
-            shutil.move(src_dir, server_dir)
-        else:
-            logger.info(f"[*] Kopiere AMP-Server von {src_dir} nach {server_dir}")
-            shutil.copytree(src_dir, server_dir)
-            
-        # Try to extract mods from AMP config
-        amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
-        mod_ids = set()
+        # --- Start Background Task ---
+        task_id = f"import_{plugin_id}"
+        IMPORT_TASKS[task_id] = {
+            "status": "running",
+            "progress": 0,
+            "message": "Start vorbereiten..."
+        }
         
-        if os.path.exists(amp_config_path):
-            try:
-                with open(amp_config_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if "mod" in line.lower() and "=" in line:
-                            val = line.split("=", 1)[1].strip()
-                            # Check if it's a comma-separated list of numbers (typical for mods)
-                            if re.match(r'^[\d,]+$', val):
-                                for m_id in val.split(','):
-                                    if m_id.strip():
-                                        mod_ids.add(m_id.strip())
-            except Exception as e:
-                logger.error(f"[!] Fehler beim Lesen der AMPConfig.conf: {e}")
-                
-        if mod_ids:
-            mods_db = []
-            for mid in mod_ids:
-                mods_db.append({
-                    "id": mid,
-                    "name": f"Imported Mod ({mid})",
-                    "version": "Auto-Update durch Server"
-                })
-            mods_dir = os.path.join(DATA_ROOT, plugin_id)
-            os.makedirs(mods_dir, exist_ok=True)
-            with open(os.path.join(mods_dir, "mods_db.json"), "w", encoding="utf-8") as f:
-                json.dump(mods_db, f, indent=2)
-            logger.info(f"[*] {len(mods_db)} Mods aus AMP Konfiguration importiert.")
-            
-        return {"status": "success", "message": f"Server erfolgreich als '{plugin_id}' importiert!"}
+        background_tasks.add_task(_run_amp_import, task_id, amp_path, mode, plugin_id, src_dir, server_dir)
+        
+        return {"status": "success", "task_id": task_id, "message": "Import läuft im Hintergrund..."}
         
     except Exception as e:
-        logger.error(f"[!] Fehler beim AMP-Import: {e}")
-        return {"status": "error", "message": f"Import fehlgeschlagen: {e}"}
+        logger.error(f"[!] Fehler beim AMP-Import-Setup: {e}")
+        return {"status": "error", "message": f"Setup fehlgeschlagen: {e}"}
 
 @router.get("/plugins/available")
 async def get_available_plugins():

@@ -130,10 +130,22 @@ export default {
                         </label>
                     </div>
 
-                    <button @click="importAmpServer" :disabled="store.isActionLoading || !store.ampImportPath" class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-3 rounded-lg transition shadow-md cursor-pointer flex items-center justify-center gap-2">
+                    <button v-if="!store.ampImportTask || store.ampImportTask.status === 'completed' || store.ampImportTask.status === 'error'" @click="importAmpServer" :disabled="store.isActionLoading || !store.ampImportPath" class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-3 rounded-lg transition shadow-md cursor-pointer flex items-center justify-center gap-2">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                         AMP Server Importieren
                     </button>
+                    
+                    <div v-if="store.ampImportTask && store.ampImportTask.status === 'running'" class="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+                        <div class="flex justify-between text-sm text-gray-300 font-bold">
+                            <span>{{ store.ampImportTask.message }}</span>
+                            <span class="text-orange-400">{{ store.ampImportTask.progress }}%</span>
+                        </div>
+                        <div class="w-full bg-gray-800 rounded-full h-3 overflow-hidden shadow-inner">
+                            <div class="bg-orange-500 h-3 rounded-full transition-all duration-300 relative overflow-hidden" :style="{ width: store.ampImportTask.progress + '%' }">
+                                <div class="absolute top-0 left-0 bottom-0 right-0 bg-white/20 animate-pulse"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -164,17 +176,42 @@ export default {
                     body: JSON.stringify({ path: store.ampImportPath, mode: store.ampImportMode || 'move' })
                 });
                 const data = await res.json();
-                if (data.status === 'success') {
-                    api.showNotification('✅ Import Erfolgreich', data.message, 'success');
-                    store.ampImportPath = '';
-                    api.loadInstalledPlugins(); // Refresh servers
+                
+                if (data.status === 'success' && data.task_id) {
+                    store.ampImportTask = { status: 'running', progress: 0, message: data.message };
+                    
+                    // Start polling
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`/api/system/importer/status/${data.task_id}`);
+                            const statusData = await statusRes.json();
+                            
+                            store.ampImportTask = statusData;
+                            
+                            if (statusData.status === 'completed') {
+                                clearInterval(pollInterval);
+                                store.isActionLoading = false;
+                                api.showNotification('✅ Import Erfolgreich', statusData.message, 'success');
+                                store.ampImportPath = '';
+                                store.ampImportTask = null; // Reset UI
+                                api.loadInstalledPlugins(); // Refresh servers
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollInterval);
+                                store.isActionLoading = false;
+                                api.showNotification('❌ Import Fehlgeschlagen', statusData.message, 'error');
+                                store.ampImportTask = null;
+                            }
+                        } catch (e) {
+                            console.error("Polling error", e);
+                        }
+                    }, 1000);
                 } else {
+                    store.isActionLoading = false;
                     api.showNotification('❌ Import Fehlgeschlagen', data.message, 'error');
                 }
             } catch (e) {
-                api.showNotification('❌ Fehler', e.message, 'error');
-            } finally {
                 store.isActionLoading = false;
+                api.showNotification('❌ Fehler', e.message, 'error');
             }
         },
         async shutdownEmberCore() {
