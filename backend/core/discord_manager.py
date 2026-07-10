@@ -46,10 +46,30 @@ class DiscordManager:
         async def on_ready():
             logger.info(f"[*] Discord Bot eingeloggt als {self.bot.user}")
             try:
+                # Synchronisiere Befehle direkt mit jedem Server (Guild) für SOFORTIGE Verfügbarkeit
+                for guild in self.bot.guilds:
+                    try:
+                        self.bot.tree.copy_global_to(guild=guild)
+                        await self.bot.tree.sync(guild=guild)
+                    except Exception as e:
+                        logger.warning(f"Konnte Commands nicht zu Server '{guild.name}' pushen: {e}")
+                
+                # Und einmal global als Fallback
                 synced = await self.bot.tree.sync()
-                logger.info(f"[*] {len(synced)} Slash-Commands mit Discord synchronisiert.")
+                logger.info(f"[*] {len(synced)} Slash-Commands mit Discord synchronisiert (Instant-Sync aktiv).")
             except Exception as e:
                 logger.error(f"Fehler beim Sync der Discord-Commands: {e}")
+
+        @self.bot.event
+        async def on_guild_join(guild):
+            # Wenn der Bot im laufenden Betrieb eingeladen wird, sofort die Commands dorthin pushen!
+            logger.info(f"[*] Bot wurde zu neuem Server eingeladen: {guild.name}")
+            try:
+                self.bot.tree.copy_global_to(guild=guild)
+                await self.bot.tree.sync(guild=guild)
+                logger.info(f"[*] Slash-Commands für neuen Server {guild.name} sofort freigeschaltet.")
+            except Exception as e:
+                logger.error(f"Fehler beim Instant-Sync für neuen Server {guild.name}: {e}")
 
         # ---------------------------------------------------------
         # COMMAND: /link
