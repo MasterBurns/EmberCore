@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.15",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FIX: Conan Exiles hat nun auch volle Unterstützung für die neue Netzwerk-Ports UI (Ports können nun bearbeitet werden und werden in die Startparameter injiziert).",
+    "FIX: Fehler in der Port-Speicherung behoben, der verhinderte, dass alleinstehende Port-Argumente korrekt aktualisiert wurden."
+  ]
+  },
+  {
   "version": "v0.1.9.14",
   "build_date": "2026-07-10",
   "changelog": [

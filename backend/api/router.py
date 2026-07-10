@@ -1184,7 +1184,26 @@ def save_network(plugin_id: str, data: dict = Body(...)):
                             new_parts.append(p)
                     new_args.append("?".join(new_parts))
                 else:
-                    new_args.append(arg)
+                    updated_standalone = False
+                    for p_obj in new_ports:
+                        desc = p_obj.get("desc", "").lower()
+                        if "game" in desc and (arg.lower().startswith("-port=") or arg.lower().startswith("port=")):
+                            prefix = "-Port=" if arg.startswith("-") else "Port="
+                            new_args.append(f"{prefix}{p_obj['port']}")
+                            updated_standalone = True
+                            break
+                        elif "query" in desc and (arg.lower().startswith("-queryport=") or arg.lower().startswith("queryport=")):
+                            prefix = "-QueryPort=" if arg.startswith("-") else "QueryPort="
+                            new_args.append(f"{prefix}{p_obj['port']}")
+                            updated_standalone = True
+                            break
+                        elif "rcon" in desc and (arg.lower().startswith("-rconport=") or arg.lower().startswith("rconport=")):
+                            prefix = "-RCONPort=" if arg.startswith("-") else "RCONPort="
+                            new_args.append(f"{prefix}{p_obj['port']}")
+                            updated_standalone = True
+                            break
+                    if not updated_standalone:
+                        new_args.append(arg)
             manifest["default_args"] = new_args
             
         # Update shutdown rcon port

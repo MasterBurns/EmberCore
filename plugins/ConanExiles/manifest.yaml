@@ -6,6 +6,16 @@ steam_app_id: 443030
 executable_windows: "ConanSandboxServer.exe"
 default_args:
   - "-log"
+  - "-Port=7777"
+  - "-QueryPort=27015"
+network_meta:
+  ports:
+    - port: 7777
+      protocol: "udp"
+      desc: "Game Port"
+    - port: 27015
+      protocol: "udp"
+      desc: "Steam Query Port"
 ports:
   - 7777
   - 27015
