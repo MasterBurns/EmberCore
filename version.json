@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.12",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: Der In-App Updater beendet nun nicht mehr versehentlich seinen eigenen Prozess beim Ausführen des Updates. Das Update läuft nun komplett durch und die App startet sich im Anschluss selbstständig wieder."
+  ]
+  },
+  {
   "version": "v0.1.9.11",
   "build_date": "2026-07-10",
   "changelog": [
