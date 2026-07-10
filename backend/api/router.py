@@ -467,8 +467,76 @@ async def import_amp_server(data: dict = Body(...)):
                     manifest_data = yaml.safe_load(f)
                 manifest_data["id"] = plugin_id
                 manifest_data["source_url"] = manifest_url
+
+                # Parse AMPConfig.conf if it exists
+                amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
+                ext_conf = {}
+                if os.path.exists(amp_config_path):
+                    try:
+                        with open(amp_config_path, "r", encoding="utf-8") as f:
+                            for line in f:
+                                if '=' not in line: continue
+                                key, val = line.split('=', 1)
+                                key, val = key.strip(), val.strip()
+                                k_lower = key.lower()
+                                if "sessionname" in k_lower or "servername" in k_lower: ext_conf["SessionName"] = val
+                                elif "maxplayers" in k_lower: ext_conf["MaxPlayers"] = int(val) if val.isdigit() else 20
+                                elif "map" in k_lower and "url" not in k_lower: ext_conf["Map"] = val
+                                elif "serverpassword" in k_lower: ext_conf["ServerPassword"] = val
+                                elif "adminpassword" in k_lower: ext_conf["ServerAdminPassword"] = val
+                                elif "queryport" in k_lower: ext_conf["QueryPort"] = val
+                                elif "rconport" in k_lower: ext_conf["RCONPort"] = val
+                                elif "portnumber" in k_lower or "gameport" in k_lower: ext_conf["Port"] = val
+                    except Exception as e:
+                        logger.error(f"[!] Fehler beim Parsen von AMPConfig.conf: {e}")
+
+                # Update Manifest default_args and network_meta with extracted ports
+                if "Port" in ext_conf or "QueryPort" in ext_conf or "RCONPort" in ext_conf:
+                    new_args = []
+                    for arg in manifest_data.get("default_args", []):
+                        if "?" in arg:
+                            parts = arg.split("?")
+                            new_parts = []
+                            for p in parts:
+                                if p.lower().startswith("port=") and "Port" in ext_conf: new_parts.append(f"Port={ext_conf['Port']}")
+                                elif p.lower().startswith("queryport=") and "QueryPort" in ext_conf: new_parts.append(f"QueryPort={ext_conf['QueryPort']}")
+                                elif p.lower().startswith("rconport=") and "RCONPort" in ext_conf: new_parts.append(f"RCONPort={ext_conf['RCONPort']}")
+                                else: new_parts.append(p)
+                            new_args.append("?".join(new_parts))
+                        else: new_args.append(arg)
+                    manifest_data["default_args"] = new_args
+                    
+                    if "network_meta" in manifest_data and "ports" in manifest_data["network_meta"]:
+                        for port_obj in manifest_data["network_meta"]["ports"]:
+                            desc = port_obj.get("desc", "").lower()
+                            if "game" in desc and "Port" in ext_conf: port_obj["port"] = int(ext_conf["Port"])
+                            elif "query" in desc and "QueryPort" in ext_conf: port_obj["port"] = int(ext_conf["QueryPort"])
+                            elif "rcon" in desc and "RCONPort" in ext_conf: port_obj["port"] = int(ext_conf["RCONPort"])
+                            
+                    if "shutdown" in manifest_data and "rcon" in manifest_data["shutdown"]:
+                        if "RCONPort" in ext_conf: manifest_data["shutdown"]["rcon"]["port"] = int(ext_conf["RCONPort"])
+                        if "ServerAdminPassword" in ext_conf: manifest_data["shutdown"]["rcon"]["default_password"] = ext_conf["ServerAdminPassword"]
+                
                 with open(manifest_path, "w", encoding="utf-8") as f: 
                     yaml.dump(manifest_data, f, allow_unicode=True, sort_keys=False)
+                    
+                # Save Map to startup.json
+                if "Map" in ext_conf:
+                    data_dir = os.path.join(DATA_ROOT, plugin_id)
+                    os.makedirs(data_dir, exist_ok=True)
+                    with open(os.path.join(data_dir, "startup.json"), "w", encoding="utf-8") as f:
+                        json.dump({"map": ext_conf["Map"]}, f)
+                        
+                # Save settings to desired_config.json
+                desired = {}
+                for k in ["SessionName", "MaxPlayers", "ServerPassword", "ServerAdminPassword"]:
+                    if k in ext_conf: desired[k] = ext_conf[k]
+                if desired:
+                    data_dir = os.path.join(DATA_ROOT, plugin_id)
+                    os.makedirs(data_dir, exist_ok=True)
+                    with open(os.path.join(data_dir, "desired_config.json"), "w", encoding="utf-8") as f:
+                        json.dump(desired, f, indent=2)
+                        
             else:
                 return {"status": "error", "message": "Konnte ASA Manifest nicht herunterladen."}
                 
