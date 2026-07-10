@@ -983,6 +983,13 @@ async def add_server_mod(plugin_id: str, mod_id: str):
 
 @router.delete("/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
+    return _do_delete_mod(plugin_id, mod_id)
+
+@router.post("/server/mods/delete_bulk/{plugin_id}")
+def delete_server_mod_bulk(plugin_id: str, data: dict = Body(...)):
+    return _do_delete_mod(plugin_id, data.get("mod_id", ""))
+
+def _do_delete_mod(plugin_id: str, mod_id: str):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest or "mods_meta" not in manifest: return {"status": "error", "message": "Manifest fehlt oder kein Modding unterstützt"}
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")

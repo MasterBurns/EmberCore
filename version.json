@@ -1,5 +1,14 @@
 [
   {
+  "version": "v0.1.9.10",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FIX: \"HASTO IST EIN BOB!\"",
+    "FEATURE: Mods können nun als kommaseparierte Liste (z.B. 1234, 5678) eingefügt werden und werden einzeln geladen.",
+    "BUGFIX: Löschen von fehlerhaften/zu langen Mod-Einträgen nun möglich."
+  ]
+  },
+  {
   "version": "v0.1.9.9",
   "build_date": "2026-07-10",
   "changelog": [

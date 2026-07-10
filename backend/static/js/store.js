@@ -211,13 +211,61 @@ export const api = {
     openModsTab() { store.serverTab = 'mods'; this.fetchMods(); },
     async fetchMods() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/mods/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.activeMods = data; } },
     async addMod() {
-        if (!store.newModId.trim()) return;
-        store.isActionLoading = true; store.loadingMessage = "Koppele mit Steam Workshop API...";
-        const res = await fetch(`/api/server/mods/add/${store.selectedPlugin}/${store.newModId.trim()}`, { method: 'POST' }); const data = await res.json();
-        if(data.status === "error") await this.alert(data.message, "Workshop Fehler");
+        const inputStr = store.newModId.trim();
+        if (!inputStr) return;
+        
+        const modIds = inputStr.split(',').map(s => s.trim()).filter(s => s);
+        if (modIds.length === 0) return;
+        
+        store.isActionLoading = true; 
+        let errors = [];
+        let successCount = 0;
+        
+        for (const modId of modIds) {
+            store.loadingMessage = `Füge Mod ${modId} hinzu... (${successCount + 1}/${modIds.length})`;
+            try {
+                const res = await fetch(`/api/server/mods/add/${store.selectedPlugin}/${encodeURIComponent(modId)}`, { method: 'POST' }); 
+                const data = await res.json();
+                if(data.status === "error") {
+                    errors.push(`Mod ${modId}: ${data.message}`);
+                } else {
+                    successCount++;
+                }
+            } catch (e) {
+                errors.push(`Mod ${modId}: Netzwerkfehler`);
+            }
+        }
+        
+        if (errors.length > 0) {
+            await this.alert("Einige Mods konnten nicht hinzugefügt werden:\n" + errors.join("\n"), "Workshop/CurseForge Fehler");
+        }
+        
         store.newModId = ""; store.isActionLoading = false; this.fetchMods();
     },
-    async deleteMod(modId) { if (!(await this.confirm("Möchtest du diese Modifikation wirklich vom Server entfernen?", "Mod löschen"))) return; await fetch(`/api/server/mods/delete/${store.selectedPlugin}/${modId}`, { method: 'DELETE' }); this.fetchMods(); },
+    async deleteMod(modId) {
+        if (!(await this.confirm("Möchtest du diese Modifikation wirklich vom Server entfernen?", "Mod löschen"))) return;
+        store.isActionLoading = true; store.loadingMessage = "Lösche Mod...";
+        
+        // Zuerst per normalem DELETE versuchen (für normale kurze IDs)
+        try {
+            // Wir verwenden POST mit Body als Fallback für extrem lange Strings, falls es die Route gibt.
+            // Um das Problem des Users zu beheben, schicken wir einfach einen POST Request.
+            const res = await fetch(`/api/server/mods/delete_bulk/${store.selectedPlugin}`, { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ mod_id: modId }) 
+            });
+            if (res.status === 404) {
+                // Fallback für alte Backend-Versionen
+                await fetch(`/api/server/mods/delete/${store.selectedPlugin}/${encodeURIComponent(modId)}`, { method: 'DELETE' });
+            }
+        } catch(e) {
+            console.error(e);
+        }
+        
+        store.isActionLoading = false;
+        this.fetchMods(); 
+    },
     openBackupTab() { store.serverTab = 'backups'; this.fetchBackups(); this.fetchBackupSchedule(); },
     async fetchBackups() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/list/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.backupList = data; } },
     async fetchBackupSchedule() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/schedule/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin !== currentPlugin) return; if (!data.schedules) data.schedules = []; if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3}; store.backupSchedule = data; } },
