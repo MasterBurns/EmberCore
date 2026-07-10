@@ -38,6 +38,23 @@ jobs:
         --clean --noconfirm backend/main.py
         if ($LASTEXITCODE -ne 0) { exit 1 }
 
+    - name: Test Windows Executable
+      shell: pwsh
+      run: |
+        Start-Process -FilePath "dist\EmberCore.exe" -NoNewWindow -PassThru
+        Start-Sleep -Seconds 10
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:8000/" -UseBasicParsing -ErrorAction SilentlyContinue
+        if ($response.StatusCode -eq 200) {
+            Write-Host "GET / successful"
+        } else {
+            Write-Error "GET / failed with status code $($response.StatusCode)"
+            # Try to get debug info
+            $debugResponse = Invoke-WebRequest -Uri "http://127.0.0.1:8000/system/debug" -UseBasicParsing -ErrorAction SilentlyContinue
+            Write-Host "Debug info: $($debugResponse.Content)"
+            exit 1
+        }
+        Stop-Process -Name "EmberCore" -Force
+
     - name: Create ZIP
       shell: pwsh
       run: |

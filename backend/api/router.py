@@ -249,7 +249,30 @@ def shutdown_embercore():
     return {"status": "success", "message": "EmberCore fährt herunter."}
 
 @router.get("/system/settings")
-def get_sys_settings(): return sys_config
+def get_settings():
+    return sys_config
+
+@router.get("/system/debug")
+def get_debug_info():
+    from core.env import BASE_DIR
+    static_dir = os.path.join(BASE_DIR, "static")
+    try:
+        base_files = os.listdir(BASE_DIR)
+    except Exception as e:
+        base_files = str(e)
+    try:
+        static_files = os.listdir(static_dir)
+    except Exception as e:
+        static_files = str(e)
+    
+    return {
+        "BASE_DIR": BASE_DIR,
+        "static_dir": static_dir,
+        "base_exists": os.path.exists(BASE_DIR),
+        "static_exists": os.path.exists(static_dir),
+        "base_files": base_files,
+        "static_files": static_files
+    }
 
 @router.post("/system/settings")
 def save_sys_settings_api(data: dict = Body(...)):
