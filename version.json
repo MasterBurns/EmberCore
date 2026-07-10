@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.11",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: Updater lädt nun die neue version.json korrekt herunter. Die Anzeige der installierten Version bleibt ab sofort nicht mehr stecken!"
+  ]
+  },
+  {
   "version": "v0.1.9.10",
   "build_date": "2026-07-10",
   "changelog": [
