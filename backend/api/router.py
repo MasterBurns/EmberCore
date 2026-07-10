@@ -890,9 +890,9 @@ def stop(plugin_id: str):
     return server_manager.stop_server(plugin_id)
 
 @router.get("/server/stats/{plugin_id}")
-def stats(plugin_id: str):
+def stats(plugin_id: str, skip_disk: bool = False):
     data = server_manager.get_stats(plugin_id)
-    data["disk"] = calculate_disk_trend(plugin_id)
+    data["disk"] = calculate_disk_trend(plugin_id) if not skip_disk else {}
     data["update_info"] = game_update_cache.get(plugin_id, {"available": False})
     
     # NEU: Dem Frontend den Backup-Status mitteilen

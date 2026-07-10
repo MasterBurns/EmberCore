@@ -45,18 +45,16 @@ class DiscordManager:
         @self.bot.event
         async def on_ready():
             logger.info(f"[*] Discord Bot eingeloggt als {self.bot.user}")
-            try:
-                # Synchronisiere Befehle direkt mit jedem Server (Guild) für SOFORTIGE Verfügbarkeit
+                # Entferne alte Gilden-Kopien (verhindert doppelte Befehle)
                 for guild in self.bot.guilds:
                     try:
-                        self.bot.tree.copy_global_to(guild=guild)
+                        self.bot.tree.clear_commands(guild=guild)
                         await self.bot.tree.sync(guild=guild)
-                    except Exception as e:
-                        logger.warning(f"Konnte Commands nicht zu Server '{guild.name}' pushen: {e}")
+                    except: pass
                 
-                # Und einmal global als Fallback
+                # Synchronisiere nur global (Discord unterstützt inzwischen Instant-Global-Sync)
                 synced = await self.bot.tree.sync()
-                logger.info(f"[*] {len(synced)} Slash-Commands mit Discord synchronisiert (Instant-Sync aktiv).")
+                logger.info(f"[*] {len(synced)} Slash-Commands synchronisiert.")
             except Exception as e:
                 logger.error(f"Fehler beim Sync der Discord-Commands: {e}")
                 
@@ -65,14 +63,8 @@ class DiscordManager:
 
         @self.bot.event
         async def on_guild_join(guild):
-            # Wenn der Bot im laufenden Betrieb eingeladen wird, sofort die Commands dorthin pushen!
             logger.info(f"[*] Bot wurde zu neuem Server eingeladen: {guild.name}")
-            try:
-                self.bot.tree.copy_global_to(guild=guild)
-                await self.bot.tree.sync(guild=guild)
-                logger.info(f"[*] Slash-Commands für neuen Server {guild.name} sofort freigeschaltet.")
-            except Exception as e:
-                logger.error(f"Fehler beim Instant-Sync für neuen Server {guild.name}: {e}")
+            # Globaler Sync greift automatisch, kein Eingriff nötig.
 
         # ---------------------------------------------------------
         # COMMAND: /link
@@ -126,7 +118,8 @@ class DiscordManager:
                         embed.add_field(name=f"{s['server_name']}", value=f"ID: `{s['id']}`\nStatus: {status_icon}", inline=False)
                     await interaction.followup.send(embed=embed, ephemeral=True)
             except Exception as e:
-                await interaction.followup.send(f"❌ Interner API-Fehler: {e}", ephemeral=True)
+                err_msg = str(e) or type(e).__name__
+                await interaction.followup.send(f"❌ API-Fehler: {err_msg}", ephemeral=True)
 
         # ---------------------------------------------------------
         # COMMAND: /start
@@ -231,7 +224,7 @@ class DiscordManager:
                     
                     for s in servers:
                         server_id = s['id']
-                        stats_res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}", timeout=2.0)
+                        stats_res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}?skip_disk=true", timeout=5.0)
                         if stats_res.status_code == 200:
                             stats = stats_res.json()
                             is_online = stats.get('status') == 'online'
@@ -243,7 +236,8 @@ class DiscordManager:
                             if is_online: val += f" | **CPU:** {cpu}% | **RAM:** {ram} MB"
                             embed.add_field(name=f"🖥️ {s['server_name']}", value=val, inline=False)
             except Exception as e:
-                embed.description = f"❌ API-Fehler: {e}"
+                err_msg = str(e) or type(e).__name__
+                embed.description = f"❌ API-Fehler: {err_msg}"
             embed.set_footer(text=f"Letztes Update: {datetime.datetime.now().strftime('%H:%M:%S')} Uhr")
             return embed
 

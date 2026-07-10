@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.6",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "BUGFIX: Discord Bot Dashboard Timeout durch langwierige Ordner-Scans behoben",
+    "BUGFIX: Doppelte Slash-Commands in Discord entfernt (Instant-Global Sync aktiviert)"
+  ]
+  },
+  {
   "version": "v0.1.9.5",
   "build_date": "2026-07-10",
   "changelog": [
