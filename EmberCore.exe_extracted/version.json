@@ -1,0 +1,366 @@
+[
+  {
+  "version": "v0.1.8.8",
+  "build_date": "2026-07-09",
+  "changelog": [
+    "FEATURE: Dynamische Map-Auswahl (Eingabe von Custom Community Maps möglich)",
+    "BUGFIX: Game-Server überschreiben beim ersten Start nicht länger die hochgezählten Ports (Auto-Increment funktioniert nun zuverlässig in den .ini Dateien)",
+    "BUGFIX: Developer Mode (Dev-Server ausblenden) speichert seinen Status nun dauerhaft",
+    "BUGFIX: ASA Startup-Map Dropdown mit Standardkarten befüllt"
+  ]
+  },
+  {
+  "version": "v0.1.8.7",
+  "build_date": "2026-07-09",
+  "changelog": [
+    "BUGFIX: Race Condition im UI behoben (verhindert das Überschreiben von Einstellungen beim schnellen Wechseln zwischen Servern)"
+  ]
+  },
+  {
+  "version": "v0.1.8.6",
+  "build_date": "2026-07-09",
+  "changelog": [
+    "BUGFIX: Server-Prozesserkennung repariert (verhindert, dass Server mit ähnlichen Namen fälschlicherweise als 'Online' markiert werden)",
+    "BUGFIX: Backups brechen nicht mehr ab, wenn einzelne Dateien (wie z.B. die game.db von Conan Exiles) während des Betriebs gesperrt sind"
+  ]
+  },
+  {
+  "version": "v0.1.8.5",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "BUGFIX: EmergencyUpdater bricht Prozesse nun zuverlässiger per taskkill ab",
+    "BUGFIX: UI-Anzeigefehler behoben, bei dem die Konfiguration zwischen Servern nicht korrekt aktualisiert wurde"
+  ]
+  },
+  {
+  "version": "v0.1.8.4",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "HOTFIX: [Errno 2] No such file or directory bei GitHub API Abfrage auf einigen Windows Systemen behoben (SSL Zertifikatsprüfung deaktiviert)"
+  ]
+  },
+  {
+  "version": "v0.1.8.3",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FIX: Präzisere Prozess-Identifikation für Server, um Verwechslungen beim Port-Scanning zu vermeiden",
+    "FEATURE: Automatisches Port-Auto-Incrementing (+10) bei Belegung durch andere Instanzen",
+    "FEATURE: Developer Mode Schalter eingebaut, um Dev-Testserver in der Sidebar auszublenden",
+    "ENHANCEMENT: Map-Auswahl direkt ins Status-Dashboard (ASA) integriert, um Ersteinrichtung zu vereinfachen",
+    "ENHANCEMENT: Alle aktuellen ASA Maps zur Manifest-Datei hinzugefügt"
+  ]
+  },
+  {
+  "version": "v0.1.8.2",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FEATURE: Standalone Windows Emergency Updater (EmergencyUpdater.bat)",
+    "FEATURE: Deep-Fallback Entpackungs-Methode für Windows und Linux Updates hinzugefügt",
+    "FEATURE: Automatischer Health-Check und Rollback-Mechanismus für fehlgeschlagene Updates",
+    "FIX: Vor dem Update wird auf Schreibrechte und GitHub Rate-Limits geprüft"
+  ]
+  },
+  {
+  "version": "v0.1.8.1",
+  "build_date": "2026-07-07",
+  "changelog": [
+    "FIX: Windows Updater bricht nicht mehr vorzeitig ab (Tree-Kill entfernt)",
+    "FIX: Linux Updater stoppt systemd Dienste nicht mehr manuell (verhindert Permission Fehler)"
+  ]
+  },
+  {
+  "version": "v0.1.8.0",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "FIX: Massives Code Refractoring",
+    "NEU: Backup fortschritt",
+    "NEU: V1 Discord Integration + Bot zur Server Verwaltung",
+    "FIX: diverse Code anpassungen um die Performance zu verbessern"
+  ]
+  },
+  {
+  "version": "v0.1.7.6",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "FIX: Store.js Syntax Error nach Cluster anpassung"
+  ]
+  },
+  {
+  "version": "v0.1.7.5",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "FIX: Formatierungs fehler"
+  ]
+  },
+  {
+  "version": "v0.1.7.4",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "NEU: Clusterlogic Config Sync erweitern"
+  ]
+  },
+  {
+  "version": "v0.1.7.3",
+  "build_date": "2026-06-29",
+  "changelog": [
+    "NEU: Cluster Config Sync",
+    "NEU: Bestehenden Instance aufrufen anstatt viele Embercore instancen zu starten"
+  ]
+  },
+  {
+  "version": "v0.1.7.2",
+  "build_date": "2026-06-28",
+  "changelog": [
+    "NEU: Cluster Logik für ASA und andere Games",
+    "NEU: Mod Sync zwischen Cluster Servern"
+  ]
+  },
+  {
+  "version": "v0.1.7.1",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Bestehende Server YAML Update"
+  ]
+  },
+  {
+  "version": "v0.1.7.0",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Mods bei SteamCMD zu Hardlinks anstatt langen pfaden"
+  ]
+  },
+  {
+  "version": "v0.1.6.9",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Fehler in Server_manager.py"
+  ]
+  },
+  {
+  "version": "v0.1.6.8",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Formatierungs anpassung wegen Boot schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.7",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Icon und Buidl Prozess Anpassung"
+  ]
+  },
+  {
+  "version": "v0.1.6.6",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Pyinstaller Imports"
+  ]
+  },
+  {
+  "version": "v0.1.6.5",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: LOOP beim Laden"
+  ]
+  },
+  {
+  "version": "v0.1.6.4",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "FIX: Ghost Processe bei Update"
+  ]
+  },
+  {
+  "version": "v0.1.6.3",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "NEU: weitere Erweiterung der Rückmeldung von Workshop mod install schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.2",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "NEU: Mehr Rückmeldung von Workshop mod install schleife"
+  ]
+  },
+  {
+  "version": "v0.1.6.1",
+  "build_date": "2026-06-26",
+  "changelog": [
+    "NEU: YAML anstatt ZIP Plugins",
+    "FIX: Workshop Mods"
+  ]
+  },
+  {
+  "version": "v0.1.6",
+  "build_date": "2026-06-25",
+  "changelog": [
+    "NEU: Code Refractoring",
+    "NEU: Updatelogic für Steammods per SteamCMD"
+  ]
+  },
+  {
+  "version": "v0.1.5.5",
+  "build_date": "2026-06-21",
+  "changelog": [
+    "FIX: zu Aggresives Recovery",
+    "FIX: Logging nicht sofort aktiv"
+  ]
+  },
+  {
+  "version": "v0.1.5.4",
+  "build_date": "2026-06-21",
+  "changelog": [
+    "NEU: RCON Logik für Stop",
+    "NEU: Plugin / Server Manifest Update"
+  ]
+  },
+  {
+  "version": "v0.1.5.3",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Logging und Verbose Logging Option + Log Viewer im Dashboard"
+  ]
+  },
+  {
+  "version": "v0.1.5.2",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Update Fehlermeldungen",
+    "NEU: Logging und Verbose Logging Option + Log Viewer im Dashboard"
+  ]
+  },
+  {
+  "version": "v0.1.5.1",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Recovery nach absturz",
+    "FIX: UX Server erstellen Button ist nicht Fixiert"
+  ]
+  },
+  {
+  "version": "v0.1.5",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "NEU: Stateless um Recovery nach absturz zu ermöglichen"
+  ]
+  },
+  {
+  "version": "v0.1.4.9",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
+  "version": "v0.1.4.8",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
+  "version": "v0.1.4.7",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Task -> Richtigen Service Status",
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
+  "version": "v0.1.4.6",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Service Status",
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
+  "version": "v0.1.4.5",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Service Status",
+    "FIX: RAM und CPU Last anzeige"
+  ]
+  },
+  {
+  "version": "v0.1.4.4",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Service -> Taskscheduler unter Windows"
+  ]
+  },
+  {
+  "version": "v0.1.4.3",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Service unter Windows"
+  ]
+  },
+  {
+  "version": "v0.1.4.2",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: UAC Meldung und Service Registration unter Windows",
+    "FIX: Browser Meldung PopUps blockieren"
+  ]
+  },
+  {
+  "version": "v0.1.4.1",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "FIX: Syntax error in Firewall integration"
+  ]
+  },
+  {
+  "version": "v0.1.4",
+  "build_date": "2026-06-20",
+  "changelog": [
+    "NEU: Firewall & Router UPnP Management",
+    "NEU: Textlisten (Whitelist/Blacklist) Editor",
+    "FIX: Beschreibungen fuer Backups hinzugefuegt"
+  ]
+  },
+  {
+    "version": "v0.1.3",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "Install as Service",
+      "   - Detect install error and provide sh script if not elevated",
+      "   - Automatic uninstall",
+      "   - Controlls for the Service",
+      "Introducing Watchdog and make it more robust in general",
+      "",
+      "Edited / Added UX for Version and Service",
+      "",
+      "Github Workflow for Automatic release Build Windows and Linux",
+      "",
+      "Added Windows Support and fixed many Bugs",
+      "",
+      "Added Portable Updater"
+    ]
+  },
+  {
+    "version": "v0.1.2.2",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "UX Server Tab Redesign"
+    ]
+  },
+  {
+    "version": "v0.1.2.1",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "QoL Features"
+    ]
+  },
+  {
+    "version": "v0.1.2",
+    "build_date": "2026-06-20",
+    "changelog": [
+      "Windows intergration"
+    ]
+  }
+]

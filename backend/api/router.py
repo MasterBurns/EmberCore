@@ -413,6 +413,80 @@ def get_installed_plugins():
                 except: pass
     return installed
 
+@router.post("/system/importer/amp")
+async def import_amp_server(data: dict = Body(...)):
+    import shutil
+    import time
+    
+    amp_path = data.get("path", "").strip()
+    mode = data.get("mode", "move")  # 'move' or 'copy'
+    
+    if not amp_path or not os.path.exists(amp_path):
+        return {"status": "error", "message": "Der angegebene Pfad existiert nicht."}
+        
+    # Auto-detect game type
+    is_asa = False
+    src_dir = None
+    
+    if os.path.exists(os.path.join(amp_path, "ARK Survival Ascended", "ShooterGame")):
+        is_asa = True
+        src_dir = os.path.join(amp_path, "ARK Survival Ascended")
+    elif os.path.exists(os.path.join(amp_path, "ShooterGame")):
+        is_asa = True
+        src_dir = amp_path
+        
+    if not is_asa or not src_dir:
+        return {"status": "error", "message": "Derzeit werden nur ASA-Server vom Importer unterstützt. Konnte 'ShooterGame' nicht finden."}
+        
+    # Generate unique plugin ID
+    safe_name = os.path.basename(os.path.normpath(amp_path))
+    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', safe_name).strip('_').lower()
+    if not safe_name: safe_name = "server"
+    plugin_id = f"asa_{safe_name}_{int(time.time())}"
+    
+    instance_dir = os.path.join(PLUGINS_ROOT, plugin_id)
+    server_dir = os.path.join(SERVERS_ROOT, plugin_id)
+    
+    if os.path.exists(instance_dir) or os.path.exists(server_dir):
+        return {"status": "error", "message": "Ein Server mit diesem Namen existiert bereits."}
+        
+    os.makedirs(instance_dir, exist_ok=True)
+    
+    try:
+        # Download ASA manifest
+        manifest_url = "https://raw.githubusercontent.com/MasterBurns/EmberCore/main/plugins/ASA/manifest.yaml"
+        async with httpx.AsyncClient() as client:
+            res = await client.get(manifest_url, timeout=10.0)
+            if res.status_code == 200:
+                manifest_path = os.path.join(instance_dir, "manifest.yaml")
+                with open(manifest_path, "wb") as f:
+                    f.write(res.content)
+                    
+                # Fix up the manifest exactly like subscribe_plugin does
+                with open(manifest_path, "r", encoding="utf-8") as f: 
+                    manifest_data = yaml.safe_load(f)
+                manifest_data["id"] = plugin_id
+                manifest_data["source_url"] = manifest_url
+                with open(manifest_path, "w", encoding="utf-8") as f: 
+                    yaml.dump(manifest_data, f, allow_unicode=True, sort_keys=False)
+            else:
+                return {"status": "error", "message": "Konnte ASA Manifest nicht herunterladen."}
+                
+        # Move or Copy the files
+        os.makedirs(os.path.dirname(server_dir), exist_ok=True)
+        if mode == "move":
+            logger.info(f"[*] Verschiebe AMP-Server von {src_dir} nach {server_dir}")
+            shutil.move(src_dir, server_dir)
+        else:
+            logger.info(f"[*] Kopiere AMP-Server von {src_dir} nach {server_dir}")
+            shutil.copytree(src_dir, server_dir)
+            
+        return {"status": "success", "message": f"Server erfolgreich als '{plugin_id}' importiert!"}
+        
+    except Exception as e:
+        logger.error(f"[!] Fehler beim AMP-Import: {e}")
+        return {"status": "error", "message": f"Import fehlgeschlagen: {e}"}
+
 @router.get("/plugins/available")
 async def get_available_plugins():
     try:
@@ -632,6 +706,22 @@ def start(plugin_id: str):
                     logger.info(f"[*] Map Override: Starte Server mit Karte '{saved_map}'")
         except: pass
 
+    # === MODS-INJECTOR (CurseForge / ASA) ===
+    mods_meta = manifest.get("mods_meta", {})
+    if mods_meta.get("provider") == "curseforge":
+        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
+        if os.path.exists(mods_file):
+            try:
+                with open(mods_file, "r", encoding="utf-8") as f:
+                    current_mods = json.load(f)
+                    if current_mods:
+                        mod_ids = [m["id"] for m in current_mods]
+                        mod_string = ",".join(mod_ids)
+                        args.append(f"-mods={mod_string}")
+                        logger.info(f"[*] Mod Injector: {len(mod_ids)} Mods via -mods Argument angehängt.")
+            except Exception as e:
+                logger.error(f"[!] Fehler beim Laden der Mods für Injector: {e}")
+
     # === DYNAMISCHE CLUSTER INJECTION & SICHERHEIT ===
     cluster_info = cluster_manager.get_injection_args(plugin_id)
     if cluster_info:
@@ -700,19 +790,30 @@ def get_server_mods(plugin_id: str):
 async def add_server_mod(plugin_id: str, mod_id: str):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest or "mods_meta" not in manifest: raise HTTPException(status_code=400, detail="Kein Modding unterstützt.")
-    steam_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
-    payload = {"itemcount": 1, "publishedfileids[0]": mod_id}
-    mod_name, mod_version = f"Workshop Mod ({mod_id})", "unbekannt"
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(steam_url, data=payload, timeout=10.0)
-            if res.status_code == 200:
-                details = res.json().get("response", {}).get("publishedfiledetails", [{}])[0]
-                if "title" in details:
-                    mod_name = details["title"]
-                    updated_ts = details.get("time_updated", 0)
-                    mod_version = datetime.fromtimestamp(updated_ts).strftime("%d.%m.%Y") if updated_ts else "1.0.0"
-    except: pass
+    
+    mods_meta = manifest.get("mods_meta", {})
+    provider = mods_meta.get("provider", "steam")
+    
+    mod_name, mod_version = f"Mod ({mod_id})", "unbekannt"
+    
+    if provider == "steam":
+        steam_url = "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/"
+        payload = {"itemcount": 1, "publishedfileids[0]": mod_id}
+        mod_name = f"Workshop Mod ({mod_id})"
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(steam_url, data=payload, timeout=10.0)
+                if res.status_code == 200:
+                    details = res.json().get("response", {}).get("publishedfiledetails", [{}])[0]
+                    if "title" in details:
+                        mod_name = details["title"]
+                        updated_ts = details.get("time_updated", 0)
+                        mod_version = datetime.fromtimestamp(updated_ts).strftime("%d.%m.%Y") if updated_ts else "1.0.0"
+        except: pass
+    elif provider == "curseforge":
+        mod_name = f"CurseForge Mod ({mod_id})"
+        mod_version = "Auto-Update durch Server"
+        
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     os.makedirs(os.path.dirname(mods_file), exist_ok=True)
     current_mods = []

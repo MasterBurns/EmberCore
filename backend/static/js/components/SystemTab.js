@@ -112,6 +112,31 @@ export default {
                 </div>
             </div>
 
+            <div class="col-span-1 md:col-span-2 bg-gray-950 p-6 rounded-xl border border-gray-900 shadow-xl space-y-5">
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider border-b border-gray-900 pb-2">📦 AMP (CubeCoders) Importer</h3>
+                <p class="text-xs text-gray-400 mt-2">Importiere bestehende ARK: Survival Ascended Server aus einer bestehenden AMP-Installation. Gib dazu den absoluten Pfad zum AMP-Instanzordner (z.B. <span class="font-mono text-gray-500">C:\\AMPDatastore\\Instances\\ASA01</span>) an.</p>
+                
+                <div class="space-y-4">
+                    <input type="text" v-model="store.ampImportPath" placeholder="Absoluter Pfad zur AMP-Instanz..." class="w-full bg-gray-900 border border-gray-800 text-sm text-white p-3 rounded-lg outline-none focus:border-orange-500 font-mono">
+                    
+                    <div class="flex items-center gap-4 bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" v-model="store.ampImportMode" value="move" class="accent-orange-600">
+                            <span class="text-sm text-gray-300 font-bold">Verschieben (Schnell)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" v-model="store.ampImportMode" value="copy" class="accent-orange-600">
+                            <span class="text-sm text-gray-300 font-bold">Kopieren (Safe, dauert länger)</span>
+                        </label>
+                    </div>
+
+                    <button @click="importAmpServer" :disabled="store.isActionLoading || !store.ampImportPath" class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-3 rounded-lg transition shadow-md cursor-pointer flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        AMP Server Importieren
+                    </button>
+                </div>
+            </div>
+
             <div class="col-span-1 md:col-span-2 bg-gray-950 p-6 rounded-xl border border-gray-900 shadow-xl flex flex-col h-96">
                 <p class="text-xs text-gray-500 uppercase font-bold tracking-wider border-b border-gray-900 pb-2 mb-4 flex justify-between items-center flex-shrink-0">
                     <span>Versions-Historie</span>
@@ -129,6 +154,29 @@ export default {
     </div>
     `,
     methods: {
+        async importAmpServer() {
+            if (!store.ampImportPath) return;
+            store.isActionLoading = true;
+            try {
+                const res = await fetch('/api/system/importer/amp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: store.ampImportPath, mode: store.ampImportMode || 'move' })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    api.showNotification('✅ Import Erfolgreich', data.message, 'success');
+                    store.ampImportPath = '';
+                    api.loadInstalledPlugins(); // Refresh servers
+                } else {
+                    api.showNotification('❌ Import Fehlgeschlagen', data.message, 'error');
+                }
+            } catch (e) {
+                api.showNotification('❌ Fehler', e.message, 'error');
+            } finally {
+                store.isActionLoading = false;
+            }
+        },
         async shutdownEmberCore() {
             // Gefixt: Direkter Zugriff auf 'api', da wir es als ES-Module importiert haben. 
             // Vermeidet Kontex-Verluste bei 'this' in reinen Vanilla-JS Objekten.

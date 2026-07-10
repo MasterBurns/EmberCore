@@ -233,9 +233,9 @@ export default {
 
                 <div v-if="store.serverTab === 'mods'" class="space-y-6">
                     <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
-                        <div><h3 class="text-sm font-bold text-white uppercase tracking-wider">🔌 Steam Workshop Modifikationen</h3></div>
+                        <div><h3 class="text-sm font-bold text-white uppercase tracking-wider">🔌 {{ store.pluginManifest?.mods_meta?.provider === 'curseforge' ? 'CurseForge' : 'Steam Workshop' }} Modifikationen</h3></div>
                         <div class="flex items-center space-x-2">
-                            <input type="text" placeholder="z.B. 880454836" v-model="store.newModId" class="bg-gray-900 border border-gray-800 text-sm text-white p-2 rounded-lg outline-none focus:border-orange-500 font-mono w-48">
+                            <input type="text" :placeholder="store.pluginManifest?.mods_meta?.provider === 'curseforge' ? 'z.B. CurseForge Mod-ID' : 'z.B. 880454836'" v-model="store.newModId" class="bg-gray-900 border border-gray-800 text-sm text-white p-2 rounded-lg outline-none focus:border-orange-500 font-mono w-48">
                             <button @click="api.addMod()" class="bg-orange-600 hover:bg-orange-500 text-xs font-semibold px-4 py-2.5 rounded-lg text-white transition cursor-pointer">➕ Mod hinzufügen</button>
                         </div>
                     </div>
@@ -243,7 +243,7 @@ export default {
                         <table class="w-full text-left border-collapse">
                             <thead>
                                 <tr class="bg-gray-900/40 border-b border-gray-900 text-gray-500 text-[10px] uppercase font-bold">
-                                    <th class="p-3">Workshop ID</th>
+                                    <th class="p-3">Mod ID</th>
                                     <th class="p-3">Mod-Name</th>
                                     <th class="p-3">Letztes Update</th>
                                     <th class="p-3 text-right">Aktionen</th>

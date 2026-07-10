@@ -24,6 +24,9 @@ startup_meta:
 executable_windows: "ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
 executable_linux: "ShooterGame/Binaries/Linux/ArkAscendedServer" 
 
+mods_meta:
+  provider: "curseforge"
+
 # Standard-Startparameter für ASA
 # TheIsland_WP ist die Standard-Map. Wir aktivieren direkt RCON für den sauberen EmberCore-Shutdown.
 default_args:
