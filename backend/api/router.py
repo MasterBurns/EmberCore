@@ -1316,6 +1316,7 @@ def get_server_startup(plugin_id: str):
     selected_map = maps[0] if has_maps else ""
     
     show_external_console = False
+    show_in_discord = True
     startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
     if os.path.exists(startup_file):
         try:
@@ -1323,9 +1324,10 @@ def get_server_startup(plugin_id: str):
                 data = json.load(f)
                 selected_map = data.get("map", selected_map)
                 show_external_console = data.get("show_external_console", False)
+                show_in_discord = data.get("show_in_discord", True)
         except: pass
         
-    return {"enabled": True, "has_maps": has_maps, "available_maps": maps, "selected_map": selected_map, "show_external_console": show_external_console}
+    return {"enabled": True, "has_maps": has_maps, "available_maps": maps, "selected_map": selected_map, "show_external_console": show_external_console, "show_in_discord": show_in_discord}
 
 @router.post("/server/startup/{plugin_id}")
 def save_server_startup(plugin_id: str, payload: dict = Body(...)):
@@ -1342,6 +1344,8 @@ def save_server_startup(plugin_id: str, payload: dict = Body(...)):
         data["map"] = payload.get("selected_map")
     if "show_external_console" in payload:
         data["show_external_console"] = payload.get("show_external_console")
+    if "show_in_discord" in payload:
+        data["show_in_discord"] = payload.get("show_in_discord")
         
     with open(startup_file, "w") as f:
         json.dump(data, f)

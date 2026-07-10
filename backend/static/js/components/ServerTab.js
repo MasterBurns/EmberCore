@@ -68,10 +68,14 @@ export default {
                             </h3>
                         </div>
                         <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Aktive Welt (Map)</label>
-                        <input list="map-options" v-model="store.startupData.selected_map" @change="api.saveMap()" placeholder="Map wählen oder Custom-Map Namen eintippen..." class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none transition shadow-sm">
+                        <input list="map-options" v-model="store.startupData.selected_map" @change="api.saveMap()" placeholder="Map wählen oder Custom-Map Namen eintippen..." class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none transition shadow-sm mb-4">
                         <datalist id="map-options">
                             <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map"></option>
                         </datalist>
+                        <label class="text-xs text-gray-400 cursor-pointer flex items-center gap-2 mt-2">
+                            <input type="checkbox" v-model="store.startupData.show_in_discord" @change="api.saveMap()" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                            Im Discord Live Dashboard anzeigen
+                        </label>
                         <p class="text-[10px] text-gray-500 mt-2">Wird beim nächsten Start des Servers geladen. Savegames sind oft an die Map gebunden.</p>
                     </div>
 

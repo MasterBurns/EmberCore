@@ -224,11 +224,21 @@ class DiscordManager:
                         return embed
                     
                     for s in servers:
-                        server_name = s.get('server_name', 'Unbekannt')
-                        if '[DEV]' in server_name:
+                        server_id = s['id']
+                        
+                        # Check if server should be shown in discord
+                        show_in_discord = True
+                        try:
+                            import json
+                            startup_file = os.path.join("data", server_id, "startup.json")
+                            if os.path.exists(startup_file):
+                                with open(startup_file, "r") as f:
+                                    show_in_discord = json.load(f).get("show_in_discord", True)
+                        except: pass
+                        
+                        if not show_in_discord:
                             continue
                             
-                        server_id = s['id']
                         stats_res = await client.get(f"http://127.0.0.1:{ACTIVE_PORT}/api/server/stats/{server_id}?skip_disk=true", timeout=5.0)
                         if stats_res.status_code == 200:
                             stats = stats_res.json()

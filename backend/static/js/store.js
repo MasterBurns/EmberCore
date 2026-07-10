@@ -237,7 +237,7 @@ export const api = {
     },
     async saveMap() {
         if (store.startupData?.enabled) {
-            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console }) });
+            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console, show_in_discord: store.startupData.show_in_discord }) });
         }
     },
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
@@ -342,7 +342,7 @@ export const api = {
         
         // NEU: Map speichern
         if (store.startupData.enabled) {
-            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console }) });
+            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console, show_in_discord: store.startupData.show_in_discord }) });
         }
         
         this.loadInstalledPlugins(); 
