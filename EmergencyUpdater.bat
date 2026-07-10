@@ -1,6 +1,7 @@
 <# :
 @echo off
 setlocal
+set "SCRIPT_DIR=%~dp0"
 :: Ensure admin privileges for stopping services
 NET SESSION >nul 2>&1
 if %errorlevel% neq 0 (
@@ -8,7 +9,7 @@ if %errorlevel% neq 0 (
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((Get-Content '%~f0') -join [Environment]::NewLine)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:SCRIPT_DIR='%SCRIPT_DIR%'; iex ((Get-Content '%~f0') -join [Environment]::NewLine)"
 exit /b
 #>
 
@@ -40,7 +41,7 @@ $form.Controls.Add($lblPath)
 $txtPath = New-Object System.Windows.Forms.TextBox
 $txtPath.Location = New-Object System.Drawing.Point(20, 45)
 $txtPath.Size = New-Object System.Drawing.Size(400, 25)
-$txtPath.Text = $PSScriptRoot
+$txtPath.Text = $env:SCRIPT_DIR
 $txtPath.Font = $fontNormal
 $form.Controls.Add($txtPath)
 
@@ -95,6 +96,10 @@ function Log($msg) {
 
 function Check-LocalVersion {
     $path = $txtPath.Text
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        $lblCurrent.Text = "Installierte Version: Fehler (Pfad leer)"
+        return
+    }
     $vFile = Join-Path $path "version.json"
     if (Test-Path $vFile) {
         try {

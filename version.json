@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.4",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "HOTFIX: Emergency Updater (Join-Path / Pfad-Erkennung) repariert, wenn als Administrator ausgeführt"
+  ]
+  },
+  {
   "version": "v0.1.9.3",
   "build_date": "2026-07-10",
   "changelog": [
