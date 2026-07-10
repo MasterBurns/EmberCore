@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.3",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "HOTFIX: NameError: name 'BackgroundTasks' is not defined behoben"
+  ]
+  },
+  {
   "version": "v0.1.9.2",
   "build_date": "2026-07-10",
   "changelog": [
