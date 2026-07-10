@@ -481,6 +481,38 @@ async def import_amp_server(data: dict = Body(...)):
             logger.info(f"[*] Kopiere AMP-Server von {src_dir} nach {server_dir}")
             shutil.copytree(src_dir, server_dir)
             
+        # Try to extract mods from AMP config
+        amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
+        mod_ids = set()
+        
+        if os.path.exists(amp_config_path):
+            try:
+                with open(amp_config_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if "mod" in line.lower() and "=" in line:
+                            val = line.split("=", 1)[1].strip()
+                            # Check if it's a comma-separated list of numbers (typical for mods)
+                            if re.match(r'^[\d,]+$', val):
+                                for m_id in val.split(','):
+                                    if m_id.strip():
+                                        mod_ids.add(m_id.strip())
+            except Exception as e:
+                logger.error(f"[!] Fehler beim Lesen der AMPConfig.conf: {e}")
+                
+        if mod_ids:
+            mods_db = []
+            for mid in mod_ids:
+                mods_db.append({
+                    "id": mid,
+                    "name": f"Imported Mod ({mid})",
+                    "version": "Auto-Update durch Server"
+                })
+            mods_dir = os.path.join(DATA_ROOT, plugin_id)
+            os.makedirs(mods_dir, exist_ok=True)
+            with open(os.path.join(mods_dir, "mods_db.json"), "w", encoding="utf-8") as f:
+                json.dump(mods_db, f, indent=2)
+            logger.info(f"[*] {len(mods_db)} Mods aus AMP Konfiguration importiert.")
+            
         return {"status": "success", "message": f"Server erfolgreich als '{plugin_id}' importiert!"}
         
     except Exception as e:
