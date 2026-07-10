@@ -1312,22 +1312,37 @@ def get_server_startup(plugin_id: str):
     if not manifest: return {"enabled": False}
     
     maps = manifest.get("maps", [])
-    if not maps: return {"enabled": False} 
+    has_maps = len(maps) > 0
+    selected_map = maps[0] if has_maps else ""
     
-    selected_map = maps[0]
+    show_external_console = False
     startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
     if os.path.exists(startup_file):
         try:
             with open(startup_file, "r") as f:
-                selected_map = json.load(f).get("map", selected_map)
+                data = json.load(f)
+                selected_map = data.get("map", selected_map)
+                show_external_console = data.get("show_external_console", False)
         except: pass
         
-    return {"enabled": True, "available_maps": maps, "selected_map": selected_map}
+    return {"enabled": True, "has_maps": has_maps, "available_maps": maps, "selected_map": selected_map, "show_external_console": show_external_console}
 
 @router.post("/server/startup/{plugin_id}")
 def save_server_startup(plugin_id: str, payload: dict = Body(...)):
-    """Speichert die gewünschte Karte für den nächsten Start ab."""
+    """Speichert die gewünschte Karte und Konsoleneinstellung für den nächsten Start ab."""
     startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
+    data = {}
+    if os.path.exists(startup_file):
+        try:
+            with open(startup_file, "r") as f:
+                data = json.load(f)
+        except: pass
+        
+    if "selected_map" in payload:
+        data["map"] = payload.get("selected_map")
+    if "show_external_console" in payload:
+        data["show_external_console"] = payload.get("show_external_console")
+        
     with open(startup_file, "w") as f:
-        json.dump({"map": payload.get("selected_map")}, f)
+        json.dump(data, f)
     return {"status": "success"}

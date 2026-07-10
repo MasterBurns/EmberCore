@@ -172,15 +172,32 @@ class ServerManager:
             except Exception as e:
                 logger.error(f"[!] Fehler beim Kopieren von steamclient64.dll: {e}")
                 
+        # Check if user wants an external console
+        show_external_console = False
+        startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
+        if os.path.exists(startup_file):
+            try:
+                import json
+                with open(startup_file, "r") as f:
+                    show_external_console = json.load(f).get("show_external_console", False)
+            except: pass
+
         try:
             startupinfo = None
             if platform.system() == "Windows":
-                # DO NOT use CREATE_NO_WINDOW (0x08000000) for Unreal Engine servers!
-                # It breaks Steam Sockets/Networking. Use STARTUPINFO with SW_HIDE instead.
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1, startupinfo=startupinfo)
+                if show_external_console:
+                    # CREATE_NEW_CONSOLE spawns the application in a new visible window. 
+                    # Note: We can't reliably pipe stdout and stderr if it's in a new console for some UE apps,
+                    # but we will try anyway. The user requested to see the external console.
+                    flags = subprocess.CREATE_NEW_CONSOLE
+                    p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1, creationflags=flags)
+                else:
+                    # DO NOT use CREATE_NO_WINDOW (0x08000000) for Unreal Engine servers!
+                    # It breaks Steam Sockets/Networking. Use STARTUPINFO with SW_HIDE instead.
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1, startupinfo=startupinfo)
             else:
                 p = subprocess.Popen([executable_path] + args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.PIPE, text=True, bufsize=1)
             

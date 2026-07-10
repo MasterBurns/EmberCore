@@ -122,6 +122,12 @@ export default {
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider">📟 Live Terminal</h3>
                             <p class="text-xs text-gray-500">Direkter stdout des Prozesses (nur bei Start über Web-UI)</p>
                         </div>
+                        <div class="flex items-center gap-2" v-if="store.startupData">
+                            <label class="text-xs text-gray-400 cursor-pointer flex items-center gap-2">
+                                <input type="checkbox" v-model="store.startupData.show_external_console" @change="api.saveMap()" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                                Externe Konsole (CMD) beim Start anzeigen
+                            </label>
+                        </div>
                     </div>
                     <div class="flex-1 p-4 overflow-y-auto font-mono text-xs text-gray-300 bg-[#0a0a0a]" id="console-output">
                         <div v-for="(log, idx) in store.consoleLogs || []" :key="idx" class="whitespace-pre-wrap">{{ log }}</div>
