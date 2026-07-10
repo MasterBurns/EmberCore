@@ -448,10 +448,10 @@ def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_
         os.makedirs(os.path.dirname(server_dir), exist_ok=True)
         shutil.copytree(src_dir, server_dir, copy_function=copy_with_progress)
         
-        # Try to extract mods from AMP config
-        amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
+        # Try to extract mods from AMP config or GameUserSettings.ini
         mod_ids = set()
         
+        amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
         if os.path.exists(amp_config_path):
             try:
                 with open(amp_config_path, "r", encoding="utf-8") as f:
@@ -464,6 +464,19 @@ def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_
                                         mod_ids.add(m_id.strip())
             except Exception as e:
                 logger.error(f"[!] Fehler beim Lesen der AMPConfig.conf: {e}")
+                
+        gus_path = os.path.join(server_dir, "ShooterGame", "Saved", "Config", "WindowsServer", "GameUserSettings.ini")
+        if os.path.exists(gus_path):
+            try:
+                with open(gus_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip().startswith("ActiveMods="):
+                            val = line.split("=", 1)[1].strip()
+                            for m_id in val.split(','):
+                                if m_id.strip() and m_id.strip().isdigit():
+                                    mod_ids.add(m_id.strip())
+            except Exception as e:
+                logger.error(f"[!] Fehler beim Lesen von GameUserSettings.ini (Mods): {e}")
                 
         if mod_ids:
             mods_db = []
@@ -1025,13 +1038,21 @@ def get_server_config(plugin_id: str):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: return {"enabled": False}
     meta = manifest.get("config_meta")
+    if not manifest: return {"enabled": False}
+    meta = manifest.get("config_meta")
     if not meta: return {"enabled": False}
 
     fields = meta.get("fields", [])
+    config_file_path = meta.get("file_path", "Unbekannt")
+    
+    # Add file path to defined fields
+    for f in fields:
+        f["file"] = config_file_path
+        
     known_keys = {f["key"] for f in fields}
     merged_values = {f["key"]: f.get("default") for f in fields}
 
-    live_path = os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path"))
+    live_path = os.path.join(SERVERS_ROOT, plugin_id, config_file_path)
     live_values = ConfigManager.parse_live_config(live_path)
 
     for k, v in live_values.items():
@@ -1057,7 +1078,7 @@ def get_server_config(plugin_id: str):
             else:
                 try: guessed_type, normalized_val = ("number", float(val_clean)) if "." in val_clean else ("number", int(val_clean))
                 except ValueError: guessed_type, normalized_val = "text", v
-            unknown_fields.append({"key": k, "label": f"⚙️ {k} (Dynamisch erkannt)", "type": guessed_type, "is_unknown": True})
+            unknown_fields.append({"key": k, "label": f"⚙️ {k} (Dynamisch erkannt)", "type": guessed_type, "is_unknown": True, "file": config_file_path})
             merged_values[k] = normalized_val
 
     return {"enabled": True, "fields": fields, "unknown_fields": unknown_fields, "values": merged_values}
@@ -1119,6 +1140,67 @@ def get_network(plugin_id: str):
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest or "network_meta" not in manifest: return {"enabled": False, "ports": []}
     return {"enabled": True, "ports": manifest["network_meta"].get("ports", [])}
+
+@router.post("/server/network/{plugin_id}")
+def save_network(plugin_id: str, data: dict = Body(...)):
+    manifest_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
+    if not os.path.exists(manifest_path):
+        return {"status": "error", "message": "Server-Manifest nicht gefunden."}
+        
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = yaml.safe_load(f)
+            
+        new_ports = data.get("ports", [])
+        if "network_meta" not in manifest:
+            manifest["network_meta"] = {"ports": []}
+            
+        manifest["network_meta"]["ports"] = new_ports
+        
+        # Update default_args to match new ports
+        if "default_args" in manifest:
+            new_args = []
+            for arg in manifest["default_args"]:
+                if "?" in arg:
+                    parts = arg.split("?")
+                    new_parts = []
+                    for p in parts:
+                        updated = False
+                        for p_obj in new_ports:
+                            desc = p_obj.get("desc", "").lower()
+                            if "game" in desc and p.lower().startswith("port="):
+                                new_parts.append(f"Port={p_obj['port']}")
+                                updated = True
+                                break
+                            elif "query" in desc and p.lower().startswith("queryport="):
+                                new_parts.append(f"QueryPort={p_obj['port']}")
+                                updated = True
+                                break
+                            elif "rcon" in desc and p.lower().startswith("rconport="):
+                                new_parts.append(f"RCONPort={p_obj['port']}")
+                                updated = True
+                                break
+                        if not updated:
+                            new_parts.append(p)
+                    new_args.append("?".join(new_parts))
+                else:
+                    new_args.append(arg)
+            manifest["default_args"] = new_args
+            
+        # Update shutdown rcon port
+        if "shutdown" in manifest and "rcon" in manifest["shutdown"]:
+            for p_obj in new_ports:
+                if "rcon" in p_obj.get("desc", "").lower():
+                    manifest["shutdown"]["rcon"]["port"] = p_obj["port"]
+                    break
+
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
+            
+        return {"status": "success", "message": "Netzwerk-Ports erfolgreich aktualisiert."}
+    except Exception as e:
+        logger.error(f"[!] Fehler beim Speichern der Netzwerk-Ports: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.post("/server/network/setup/{plugin_id}")
 def setup_network(plugin_id: str):

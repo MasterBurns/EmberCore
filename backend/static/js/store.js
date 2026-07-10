@@ -32,6 +32,8 @@ export const store = reactive({
     newSchedVal: "",
 
     configData: { enabled: false, fields: [], unknown_fields: [], values: {} },
+    configSearchText: "",
+    configCollapsedFiles: {},
     listData: { enabled: false, lists: [] },
     networkData: { enabled: false, ports: [] },
 
@@ -63,6 +65,40 @@ export const categorizedPlugins = computed(() => {
 
 export const currentServerData = computed(() => {
     return store.installedPlugins.find(p => p.id === store.selectedPlugin) || { server_name: "Server", game_name: "Unbekannt" };
+});
+
+export const filteredGroupedConfigFields = computed(() => {
+    const search = store.configSearchText.toLowerCase().trim();
+    const groups = {};
+    
+    const allFields = store.configData?.fields || [];
+    allFields.forEach(f => {
+        const val = String(store.configData.values[f.key] || '').toLowerCase();
+        const keyMatch = f.key.toLowerCase().includes(search);
+        const labelMatch = (f.label || '').toLowerCase().includes(search);
+        const valMatch = val.includes(search);
+        
+        if (search === "" || keyMatch || labelMatch || valMatch) {
+            const file = f.file || "Einstellung";
+            if (!groups[file]) groups[file] = { fields: [], unknown_fields: [] };
+            groups[file].fields.push(f);
+        }
+    });
+
+    const allUnknowns = store.configData?.unknown_fields || [];
+    allUnknowns.forEach(f => {
+        const val = String(store.configData.values[f.key] || '').toLowerCase();
+        const keyMatch = f.key.toLowerCase().includes(search);
+        const valMatch = val.includes(search);
+        
+        if (search === "" || keyMatch || valMatch) {
+            const file = f.file || "Einstellung";
+            if (!groups[file]) groups[file] = { fields: [], unknown_fields: [] };
+            groups[file].unknown_fields.push(f);
+        }
+    });
+
+    return groups;
 });
 
 export const formatUptime = (seconds) => {
@@ -207,6 +243,22 @@ export const api = {
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
     async saveList(lst) { const payload = {}; payload[lst.id] = lst.content; await fetch(`/api/server/lists/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await this.alert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert"); },
     async openNetworkTab() { store.serverTab = 'network'; const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/network/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.networkData = data; } },
+    async saveNetworkPorts() {
+        store.isActionLoading = true;
+        store.loadingMessage = "Speichere Ports...";
+        try {
+            const res = await fetch(`/api/server/network/${store.selectedPlugin}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ports: store.networkData.ports })
+            });
+            const data = await res.json();
+            await this.alert(data.message, data.status === "success" ? "Ports gespeichert" : "Fehler");
+        } catch (e) {
+            await this.alert("Netzwerkfehler beim Speichern der Ports.", "Fehler");
+        }
+        store.isActionLoading = false;
+    },
     async triggerNetworkSetup() { store.isActionLoading = true; store.loadingMessage = "Erstelle und sende Firewall/Router Anweisung..."; const res = await fetch(`/api/server/network/setup/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Netzwerk Setup"); store.isActionLoading = false; },
     openModsTab() { store.serverTab = 'mods'; this.fetchMods(); },
     async fetchMods() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/mods/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.activeMods = data; } },

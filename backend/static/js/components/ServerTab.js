@@ -1,7 +1,7 @@
-import { store, api, currentServerData } from '../store.js';
+import { store, api, currentServerData, filteredGroupedConfigFields } from '../store.js';
 
 export default {
-    setup() { return { store, api, currentServerData }; },
+    setup() { return { store, api, currentServerData, filteredGroupedConfigFields }; },
     template: `
     <div class="max-w-5xl mx-auto space-y-6">
         
@@ -128,42 +128,58 @@ export default {
                     </div>
                 </div>
 
-                <div v-if="store.serverTab === 'config'" class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
+                <div v-if="store.serverTab === 'config'" class="space-y-4">
+                    <div class="bg-gray-950 rounded-xl p-4 border border-gray-900 shadow-md sticky top-0 z-10">
+                        <div class="relative">
+                            <input type="text" v-model="store.configSearchText" placeholder="Suche in Einstellungen (Name oder Wert)..." class="w-full bg-gray-900 border border-gray-800 rounded-lg py-3 pl-10 pr-4 text-sm text-white focus:border-orange-500 outline-none transition">
+                            <span class="absolute left-3 top-3 text-gray-500">🔍</span>
+                        </div>
+                    </div>
                     
                     <template v-if="store.configData?.enabled">
-                        <div class="space-y-4">
-                            <div v-for="field in store.configData?.fields || []" :key="field.key" class="flex flex-col space-y-2 border-b border-gray-900/50 pb-3">
-                                <label class="text-xs font-bold text-gray-400 uppercase tracking-wide">{{ field.label }}</label>
-                                
-                                <div v-if="field.type === 'boolean'" class="flex items-center pt-1">
-                                    <label class="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" v-model="store.configData.values[field.key]" class="sr-only peer">
-                                        <div class="w-11 h-6 bg-gray-900 border border-gray-800 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600 after:absolute after:top-0.5 after:left-[2px]"></div>
-                                    </label>
-                                    <span class="text-xs text-gray-500 ml-3 font-mono font-bold">{{ store.configData.values[field.key] ? 'AKTIVIERT' : 'DEAKTIVIERT' }}</span>
-                                </div>
-                                
-                                <input v-if="field.type === 'text'" type="text" v-model="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
-                                <input v-if="field.type === 'number'" type="number" v-model.number="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
+                        <div v-for="(group, fileName) in filteredGroupedConfigFields" :key="fileName" class="bg-gray-950 rounded-xl border border-gray-900 shadow-md overflow-hidden">
+                            <div @click="store.configCollapsedFiles[fileName] = !store.configCollapsedFiles[fileName]" class="bg-gray-900 px-5 py-3 cursor-pointer flex justify-between items-center hover:bg-gray-800 transition">
+                                <h3 class="text-sm font-bold text-orange-500 uppercase tracking-wide flex items-center gap-2">
+                                    <span class="text-lg">{{ store.configCollapsedFiles[fileName] ? '📁' : '📂' }}</span> {{ fileName }}
+                                </h3>
+                                <span class="text-xs text-gray-500 font-bold">{{ group.fields.length + group.unknown_fields.length }} Parameter</span>
                             </div>
                             
-                            <div v-if="store.configData?.unknown_fields?.length > 0" class="pt-4 space-y-4">
-                                <div class="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-orange-950/40 pb-2">Erweiterte Parameter (Dynamisch erkannt)</div>
-                                <div v-for="field in store.configData.unknown_fields" :key="field.key" class="flex flex-col space-y-2 border-b border-gray-900/50 pb-3">
-                                    <label class="text-xs font-bold text-gray-500 font-mono">{{ field.key }}</label>
-                                    
-                                    <div v-if="field.type === 'boolean'" class="flex items-center pt-1">
-                                        <label class="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" v-model="store.configData.values[field.key]" class="sr-only peer">
-                                            <div class="w-11 h-6 bg-gray-900 border border-gray-800 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-900 after:absolute after:top-0.5 after:left-[2px]"></div>
-                                        </label>
-                                        <span class="text-xs text-gray-600 ml-3 font-mono">{{ store.configData.values[field.key] ? 'TRUE' : 'FALSE' }}</span>
+                            <div v-show="!store.configCollapsedFiles[fileName]" class="p-5 space-y-4">
+                                <div v-if="group.fields.length > 0" class="space-y-4">
+                                    <div v-for="field in group.fields" :key="field.key" class="flex flex-col space-y-2 border-b border-gray-900/50 pb-3">
+                                        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide">{{ field.label }}</label>
+                                        
+                                        <div v-if="field.type === 'boolean'" class="flex items-center pt-1">
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="store.configData.values[field.key]" class="sr-only peer">
+                                                <div class="w-11 h-6 bg-gray-900 border border-gray-800 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600 after:absolute after:top-0.5 after:left-[2px]"></div>
+                                            </label>
+                                            <span class="text-xs text-gray-500 ml-3 font-mono font-bold">{{ store.configData.values[field.key] ? 'AKTIVIERT' : 'DEAKTIVIERT' }}</span>
+                                        </div>
+                                        
+                                        <input v-if="field.type === 'text'" type="text" v-model="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
+                                        <input v-if="field.type === 'number'" type="number" v-model.number="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white focus:border-orange-500 outline-none w-full">
                                     </div>
-                                    
-                                    <input v-if="field.type === 'text'" type="text" v-model="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-gray-400 focus:border-orange-900 outline-none w-full font-mono">
-                                    <input v-if="field.type === 'number'" type="number" v-model.number="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-gray-400 focus:border-orange-900 outline-none w-full font-mono">
                                 </div>
-                            </div>
+                                
+                                <div v-if="group.unknown_fields.length > 0" class="pt-4 space-y-4">
+                                    <div v-if="group.fields.length > 0" class="text-xs font-black text-orange-500 uppercase tracking-widest border-b border-orange-950/40 pb-2">Erweiterte Parameter (Dynamisch erkannt)</div>
+                                    <div v-for="field in group.unknown_fields" :key="field.key" class="flex flex-col space-y-2 border-b border-gray-900/50 pb-3">
+                                        <label class="text-xs font-bold text-gray-500 font-mono">{{ field.key }}</label>
+                                        
+                                        <div v-if="field.type === 'boolean'" class="flex items-center pt-1">
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" v-model="store.configData.values[field.key]" class="sr-only peer">
+                                                <div class="w-11 h-6 bg-gray-900 border border-gray-800 rounded-full peer peer-checked:after:translate-x-full after:bg-gray-400 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-900 after:absolute after:top-0.5 after:left-[2px]"></div>
+                                            </label>
+                                            <span class="text-xs text-gray-600 ml-3 font-mono">{{ store.configData.values[field.key] ? 'TRUE' : 'FALSE' }}</span>
+                                        </div>
+                                        
+                                        <input v-if="field.type === 'text'" type="text" v-model="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-gray-400 focus:border-orange-900 outline-none w-full font-mono">
+                                        <input v-if="field.type === 'number'" type="number" v-model.number="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-gray-400 focus:border-orange-900 outline-none w-full font-mono">
+                                    </div>
+                                </div>
                         </div>
                         <button @click="api.saveConfig()" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium p-2.5 rounded-lg transition shadow-md mt-4 cursor-pointer text-sm">💾 Einstellungen speichern</button>
                     </template>
@@ -211,13 +227,16 @@ export default {
                         </div>
                         <div v-else class="space-y-6 border-t border-gray-900 pt-4">
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div v-for="port in store.networkData?.ports || []" :key="port.port" class="bg-gray-900 border border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-inner">
-                                    <div>
-                                        <p class="text-xs text-gray-500 font-bold uppercase tracking-wide">{{ port.desc }}</p>
-                                        <p class="text-2xl font-mono text-white font-bold mt-1">{{ port.port }}</p>
+                                <div v-for="(port, idx) in store.networkData?.ports || []" :key="idx" class="bg-gray-900 border border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-inner">
+                                    <div class="w-full mr-4">
+                                        <p class="text-xs text-gray-500 font-bold uppercase tracking-wide mb-2">{{ port.desc }}</p>
+                                        <input type="number" v-model.number="port.port" class="w-full bg-[#0a0a0a] border border-gray-800 text-white font-mono text-lg font-bold px-3 py-1 rounded focus:border-orange-500 outline-none">
                                     </div>
                                     <span class="text-[10px] bg-orange-950/60 text-orange-400 border border-orange-900 px-2 py-1 rounded uppercase font-bold">{{ port.protocol }}</span>
                                 </div>
+                            </div>
+                            <div class="flex justify-end pt-2">
+                                <button @click="api.saveNetworkPorts()" :disabled="store.isActionLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-6 py-2 rounded-lg shadow-md cursor-pointer transition">💾 Ports speichern</button>
                             </div>
                             <div class="bg-gray-900/40 p-4 rounded-xl border border-gray-800 mt-4">
                                 <div class="flex justify-between items-center mb-3 border-b border-gray-800 pb-3">

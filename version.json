@@ -1,5 +1,14 @@
 [
   {
+  "version": "v0.1.9.13",
+  "build_date": "2026-07-10",
+  "changelog": [
+    "FEATURE: Der AMP Importer liest nun die in AMP aktivierten Mods sauber aus der GameUserSettings.ini aus und importiert sie automatisch in EmberCore.",
+    "FEATURE: Die Netzwerk-Ports (Game Port, Query Port, RCON) für den ASA Server können nun direkt im 'Netzwerk' Reiter konfiguriert werden.",
+    "FEATURE: Die Server-Einstellungen haben nun eine Live-Volltextsuche erhalten und sind nach ihrer Herkunfts-Datei gruppiert einklappbar, für einen extrem viel besseren Überblick."
+  ]
+  },
+  {
   "version": "v0.1.9.12",
   "build_date": "2026-07-10",
   "changelog": [
