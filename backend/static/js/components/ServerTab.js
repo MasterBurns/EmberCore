@@ -360,7 +360,10 @@ export default {
                     <div class="bg-gray-950 rounded-xl border border-gray-900 overflow-hidden shadow-md">
                         <div class="p-4 bg-gray-950 border-b border-gray-900 flex justify-between items-center">
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider">📦 Vorhandene Speicherstände</h3>
-                            <button @click="api.createBackup()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
+                            <div class="flex gap-2">
+                                <button @click="api.importSavegame()" :disabled="store.isActionLoading" class="bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">📤 Import (.zip)</button>
+                                <button @click="api.createBackup()" :disabled="store.isActionLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
+                            </div>
                         </div>
                         <div v-if="store.serverStats?.backup_progress?.active" class="bg-gray-900 border border-gray-800 p-4 rounded-xl mb-4 shadow-inner">
                             <div class="flex justify-between items-center mb-2">

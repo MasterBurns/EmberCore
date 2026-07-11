@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.22",
+  "build_date": "2026-07-11",
+  "changelog": [
+    "FEATURE: 'Kugelsicherer' Savegame-Importer hinzugefügt. Erlaubt den Import von ZIP-Dateien im Backup-Tab und korrigiert automatisch falsch gepackte Ordnerstrukturen für dumme User."
+  ]
+  },
+  {
   "version": "v0.1.9.21",
   "build_date": "2026-07-11",
   "changelog": [

@@ -1305,6 +1305,38 @@ def delete_backup(plugin_id: str, filename: str):
     backup_manager.delete_backup(plugin_id, filename)
     return {"status": "success"}
 
+from fastapi import UploadFile, File
+import tempfile
+import shutil
+
+@router.post("/server/backup/import/{plugin_id}")
+async def import_backup(plugin_id: str, file: UploadFile = File(...)):
+    if not file.filename.endswith(".zip"):
+        return {"status": "error", "message": "Bitte lade nur .zip Dateien hoch!"}
+        
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+            
+        manifest = ConfigManager.load_manifest(plugin_id)
+        if not manifest or "backup" not in manifest or "source_path" not in manifest["backup"]:
+            os.remove(tmp_path)
+            return {"status": "error", "message": "Plugin hat keinen definierten Save-Pfad im Manifest."}
+            
+        source_rel_path = manifest["backup"]["source_path"]
+        server_dir = os.path.join(SERVERS_ROOT, plugin_id)
+        
+        # Achtung: Wir führen hier KEIN automatisches Backup mehr durch,
+        # da create_backup asynchron läuft und es sonst knallt, wenn wir direkt danach löschen.
+        
+        res = backup_manager.import_savegame(plugin_id, server_dir, source_rel_path, tmp_path)
+        os.remove(tmp_path)
+        return res
+        
+    except Exception as e:
+        return {"status": "error", "message": f"Upload Fehler: {str(e)}"}
+
 @router.get("/server/startup/{plugin_id}")
 def get_server_startup(plugin_id: str):
     """Liest aus dem Manifest, ob Karten wählbar sind, und lädt die aktuelle Auswahl."""

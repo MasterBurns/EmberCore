@@ -366,6 +366,41 @@ export const api = {
     async createBackup() { await fetch(`/api/server/backup/create/${store.selectedPlugin}`, { method: 'POST' }); this.fetchBackups(); },
     async restoreBackup(filename) { if (!(await this.confirm(`Möchtest du das Backup '${filename}' wirklich einspielen?\n\nAlle aktuellen Fortschritte werden überschrieben!`, "Backup einspielen"))) return; await fetch(`/api/server/backup/restore/${store.selectedPlugin}/${filename}`, { method: 'POST' }); await this.alert("Das Rollback war erfolgreich.", "Erfolg"); },
     async deleteBackup(filename) { if (!(await this.confirm(`Soll das Backup unwiderruflich gelöscht werden?`, "Archiv löschen"))) return; await fetch(`/api/server/backup/delete/${store.selectedPlugin}/${filename}`, { method: 'DELETE' }); this.fetchBackups(); },
+    
+    async importSavegame() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.zip';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            if (!(await this.confirm(`Möchtest du den Spielstand aus '${file.name}' wirklich importieren?\n\nDie Ordnerstruktur wird automatisch korrigiert. Achtung: Dein bisheriger lokaler Fortschritt wird gnadenlos gelöscht/überschrieben!`, "Savegame Importieren"))) return;
+            
+            const formData = new FormData();
+            formData.append("file", file);
+            
+            store.isActionLoading = true;
+            try {
+                const res = await fetch(`/api/server/backup/import/${store.selectedPlugin}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    await this.alert(data.message, "Erfolg");
+                } else {
+                    await this.alert(data.message, "Fehler");
+                }
+            } catch (err) {
+                await this.alert("Netzwerkfehler beim Upload.", "Fehler");
+            } finally {
+                store.isActionLoading = false;
+            }
+        };
+        input.click();
+    },
+
     // NEU: Discord API Methoden
     async fetchDiscordSettings() {
         try {

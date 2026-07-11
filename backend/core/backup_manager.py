@@ -234,3 +234,50 @@ class BackupManager:
             if b["file"] not in to_keep:
                 try: os.remove(b["path"])
                 except: pass
+
+    def import_savegame(self, plugin_id: str, server_dir: str, source_rel_path: str, zip_path: str):
+        import tempfile
+        
+        target_game_dir = os.path.normpath(os.path.join(server_dir, source_rel_path))
+        target_basename = os.path.basename(source_rel_path.rstrip("/\\"))
+        
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(tmp_dir)
+                    
+                # "Kugelsichere" Suche: Suchen nach dem Ordnernamen (z.B. "SaveGames")
+                found_path = None
+                for root, dirs, files in os.walk(tmp_dir):
+                    if target_basename.lower() in [d.lower() for d in dirs]:
+                        # Finde den original case
+                        for d in dirs:
+                            if d.lower() == target_basename.lower():
+                                found_path = os.path.join(root, d)
+                                break
+                        break
+                
+                # Wenn nicht gefunden, prüfen ob typische Savegame-Dateien vorhanden sind
+                if not found_path:
+                    for root, dirs, files in os.walk(tmp_dir):
+                        if any(f.endswith('.sav') or f.endswith('.ark') or f.endswith('.db') for f in files):
+                            found_path = tmp_dir
+                            break
+                            
+                if not found_path:
+                    return {"status": "error", "message": f"Konnte keinen '{target_basename}' Ordner oder typische Save-Dateien (.sav, .ark) in der Zip finden!"}
+                
+                # Falls Ziel schon existiert, komplett leeren
+                if os.path.exists(target_game_dir):
+                    shutil.rmtree(target_game_dir)
+                
+                # Gefundenen Ordner ans Ziel kopieren
+                shutil.copytree(found_path, target_game_dir)
+                
+            return {"status": "success", "message": "Savegame wurde erfolgreich importiert und die Ordnerstruktur korrigiert!"}
+        except zipfile.BadZipFile:
+            return {"status": "error", "message": "Die hochgeladene Datei ist keine gültige ZIP-Datei."}
+        except Exception as e:
+            from core.env import logger
+            logger.error(f"Import Fehler: {str(e)}")
+            return {"status": "error", "message": f"Import fehlgeschlagen: {str(e)}"}
