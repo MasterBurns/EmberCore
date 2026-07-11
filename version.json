@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.23",
+  "build_date": "2026-07-12",
+  "changelog": [
+    "BUGFIX: Fehlende Abhängigkeit 'python-multipart' zu den Requirements hinzugefügt, da der neue Savegame Importer (FastAPI UploadFile) diese für den Windows Build zwingend voraussetzt."
+  ]
+  },
+  {
   "version": "v0.1.9.22",
   "build_date": "2026-07-11",
   "changelog": [

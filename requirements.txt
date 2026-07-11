@@ -5,3 +5,4 @@ httpx
 pyyaml
 pydantic
 discord.py
+python-multipart
