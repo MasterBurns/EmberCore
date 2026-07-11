@@ -400,7 +400,7 @@ def get_installed_plugins():
                         if os.path.exists(desired_path):
                             with open(desired_path, "r", encoding="utf-8") as df: live_values = json.load(df)
                         else:
-                            live_values = ConfigManager.parse_live_config(os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path")))
+                            live_values = ConfigManager.parse_live_config(os.path.join(SERVERS_ROOT, plugin_id, meta.get("file_path")), meta.get("format", "ini"))
 
                         hostname_key = next((f["key"] for f in meta.get("fields", []) if "hostname" in f["key"].lower() or "name" in f["key"].lower()), None)
                         if hostname_key and live_values.get(hostname_key):
@@ -1053,7 +1053,7 @@ def get_server_config(plugin_id: str):
     merged_values = {f["key"]: f.get("default") for f in fields}
 
     live_path = os.path.join(SERVERS_ROOT, plugin_id, config_file_path)
-    live_values = ConfigManager.parse_live_config(live_path)
+    live_values = ConfigManager.parse_live_config(live_path, manifest["config_meta"].get("format", "ini"))
 
     for k, v in live_values.items():
         if k in known_keys: merged_values[k] = v

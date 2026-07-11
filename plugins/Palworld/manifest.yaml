@@ -1,0 +1,162 @@
+name: "Palworld"
+engine: "steamcmd"
+steam_app_id: 2394010
+
+maps:
+  - "Palworld"
+
+startup_meta:
+  map_arg_position: 0
+  maps:
+    - "Palworld"
+
+executable_windows: "PalServer.exe"
+executable_linux: "PalServer.sh"
+
+default_args:
+  - "-useperfthreads"
+  - "-NoAsyncLoadingThread"
+  - "-UseMultithreadForDS"
+
+network_meta:
+  ports:
+    - port: 8211
+      protocol: "udp"
+      desc: "Game Port"
+    - port: 25575
+      protocol: "tcp"
+      desc: "RCON Port"
+    - port: 8212
+      protocol: "tcp"
+      desc: "REST API Port"
+
+shutdown:
+  rcon:
+    command: "Shutdown 10 Server is shutting down!"
+    port: 25575
+    default_password: "EmberCoreRcon"
+    config_path: "Pal/Saved/Config/WindowsServer/PalWorldSettings.ini"
+    password_key: "AdminPassword"
+    port_key: "RCONPort"
+
+backup:
+  source_path: "Pal/Saved/SaveGames"
+
+config_meta:
+  file_path: "Pal/Saved/Config/WindowsServer/PalWorldSettings.ini"
+  format: "palworld_ini"
+  fields:
+    - key: "ServerName"
+      label: "Server Name"
+      type: "text"
+      default: "Default Palworld Server"
+      
+    - key: "ServerDescription"
+      label: "Server Beschreibung"
+      type: "text"
+      default: ""
+      
+    - key: "ServerPassword"
+      label: "Server Passwort"
+      type: "text"
+      default: ""
+      
+    - key: "AdminPassword"
+      label: "Admin Passwort"
+      type: "text"
+      default: "EmberCoreRcon"
+      
+    - key: "ServerPlayerMaxNum"
+      label: "Maximale Spieler"
+      type: "number"
+      default: 32
+
+    - key: "Difficulty"
+      label: "Schwierigkeit (None/Normal/Hard)"
+      type: "text"
+      default: "None"
+      
+    - key: "ExpRate"
+      label: "EXP Rate"
+      type: "number"
+      default: 1.000000
+      
+    - key: "DayTimeSpeedRate"
+      label: "Tageszeit Geschwindigkeit"
+      type: "number"
+      default: 1.000000
+      
+    - key: "NightTimeSpeedRate"
+      label: "Nachtzeit Geschwindigkeit"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PalCaptureRate"
+      label: "Pal Fangrate"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PalSpawnNumRate"
+      label: "Pal Spawn Rate"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PalDamageRateAttack"
+      label: "Pal Angriffs-Schaden"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PalDamageRateDefense"
+      label: "Pal Verteidigung"
+      type: "number"
+      default: 1.000000
+
+    - key: "PlayerDamageRateAttack"
+      label: "Spieler Angriffs-Schaden"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PlayerDamageRateDefense"
+      label: "Spieler Verteidigung"
+      type: "number"
+      default: 1.000000
+      
+    - key: "PlayerStaminaDecreaceRate"
+      label: "Ausdauer-Verbrauch"
+      type: "number"
+      default: 1.000000
+      
+    - key: "bIsPvP"
+      label: "PvP Modus"
+      type: "boolean"
+      default: False
+      
+    - key: "bIsMultiplay"
+      label: "Multiplayer"
+      type: "boolean"
+      default: True
+      
+    - key: "DeathPenalty"
+      label: "Todesstrafe (None/Item/ItemAndEquipment/All)"
+      type: "text"
+      default: "All"
+
+    - key: "RCONEnabled"
+      label: "RCON Aktiviert"
+      type: "boolean"
+      default: True
+      
+    - key: "RCONPort"
+      label: "RCON Port"
+      type: "number"
+      default: 25575
+      
+    - key: "RESTAPIEnabled"
+      label: "REST API Aktiviert"
+      type: "boolean"
+      default: True
+      
+    - key: "RESTAPIPort"
+      label: "REST API Port"
+      type: "number"
+      default: 8212

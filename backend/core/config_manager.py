@@ -115,7 +115,7 @@ class ConfigManager:
         return local_manifest
 
     @staticmethod
-    def parse_live_config(file_path: str) -> dict:
+    def parse_live_config(file_path: str, format: str = "ini") -> dict:
         values = {}
         if not os.path.exists(file_path): return values
         try:
@@ -127,6 +127,23 @@ class ConfigManager:
                         if v.startswith('"') and v.endswith('"'): v = v[1:-1]
                         if v.startswith("'") and v.endswith("'"): v = v[1:-1]
                         values[k] = v
+                        
+            if format == "palworld_ini" and "OptionSettings" in values:
+                # OptionSettings=(ServerName="Default Palworld Server",ServerDescription="",...)
+                # We extract the content inside the parentheses
+                opt_str = values["OptionSettings"]
+                if opt_str.startswith("(") and opt_str.endswith(")"):
+                    opt_str = opt_str[1:-1]
+                    
+                # Split by comma, but be careful of commas inside quotes.
+                # A simple regex for key=value where value might be quoted or not:
+                parts = re.findall(r'([^,]+)="([^"]*)"|([^,]+)=([^,]*)', opt_str)
+                for p in parts:
+                    if p[0]: # quoted value
+                        values[p[0].strip()] = p[1]
+                    elif p[2]: # unquoted value
+                        values[p[2].strip()] = p[3]
+                        
         except: pass
         return values
 
@@ -147,22 +164,60 @@ class ConfigManager:
 
         updated_keys = set()
         new_lines = []
-        for line in lines:
-            match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
-            if match:
-                key = match.group(1).strip()
-                if key in desired_values:
-                    val = desired_values[key]
-                    val_str = "True" if val is True else ("False" if val is False else str(val))
-                    new_lines.append(f"{key}={val_str}\n")
-                    updated_keys.add(key)
-                    continue
-            new_lines.append(line)
-
-        for key, val in desired_values.items():
-            if key not in updated_keys:
-                val_str = "True" if val is True else ("False" if val is False else str(val))
-                new_lines.append(f"{key}={val_str}\n")
+        fmt = manifest["config_meta"].get("format", "ini")
+        
+        if fmt == "palworld_ini":
+            # For Palworld, we completely rewrite OptionSettings
+            # Find the [Script/Pal.PalGameWorldSettings] header
+            has_header = False
+            for line in lines:
+                if "[/Script/Pal.PalGameWorldSettings]" in line:
+                    has_header = True
+                    break
+                    
+            new_lines = []
+            if not has_header:
+                new_lines.append("[/Script/Pal.PalGameWorldSettings]\n")
+            else:
+                for line in lines:
+                    if not line.strip().startswith("OptionSettings="):
+                        new_lines.append(line)
+                        
+            # Build the OptionSettings string
+            opt_parts = []
+            for k, v in desired_values.items():
+                if isinstance(v, bool):
+                    val_str = "True" if v else "False"
+                elif isinstance(v, (int, float)):
+                    if isinstance(v, float):
+                        val_str = f"{v:.6f}"
+                    else:
+                        val_str = str(v)
+                else:
+                    # Escape quotes in strings
+                    safe_v = str(v).replace('"', '\\"')
+                    val_str = f'"{safe_v}"'
+                opt_parts.append(f"{k}={val_str}")
+                
+            new_lines.append(f"OptionSettings=({','.join(opt_parts)})\n")
+            
+        else:
+            for line in lines:
+                match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
+                if match:
+                    key = match.group(1).strip()
+                    if key in desired_values:
+                        val = desired_values[key]
+                        val_str = "True" if val is True else ("False" if val is False else str(val))
+                        new_lines.append(f"{key}={val_str}\n")
+                        updated_keys.add(key)
+                        continue
+                new_lines.append(line)
+                
+            for k, v in desired_values.items():
+                if k not in updated_keys:
+                    val_str = "True" if v is True else ("False" if v is False else str(v))
+                    new_lines.append(f"{k}={val_str}\n")
 
         with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
 

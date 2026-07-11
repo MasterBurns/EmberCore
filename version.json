@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.1.9.21",
+  "build_date": "2026-07-11",
+  "changelog": [
+    "FEATURE: Neues Plugin 'Palworld' hinzugefügt!",
+    "FEATURE: Der ConfigManager unterstützt ab sofort das einzigartige 'palworld_ini' Format (OptionSettings=(...)), ohne die restlichen INI-Parser (ARK, Conan etc.) zu beeinflussen."
+  ]
+  },
+  {
   "version": "v0.1.9.20",
   "build_date": "2026-07-10",
   "changelog": [
