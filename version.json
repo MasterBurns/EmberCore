@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.24",
+  "build_date": "2026-07-12",
+  "changelog": [
+    "BUGFIX: GitHub Actions Build-Workflow angepasst, sodass immer dynamisch die 'requirements.txt' installiert wird, statt hart-codierter Abhängigkeiten. Zudem expliziter 'multipart' Hidden-Import für PyInstaller hinzugefügt."
+  ]
+  },
+  {
   "version": "v0.1.9.23",
   "build_date": "2026-07-12",
   "changelog": [
