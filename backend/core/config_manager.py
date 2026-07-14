@@ -148,6 +148,26 @@ class ConfigManager:
         return values
 
     @staticmethod
+    def get_full_live_config(plugin_id: str) -> dict:
+        manifest = ConfigManager.load_manifest(plugin_id)
+        if not manifest or not manifest.get("config_meta"): return {}
+        
+        default_file = manifest["config_meta"].get("file_path")
+        fmt = manifest["config_meta"].get("format", "ini")
+        
+        files_to_read = {default_file} if default_file else set()
+        for field in manifest["config_meta"].get("fields", []):
+            if "file_path" in field:
+                files_to_read.add(field["file_path"])
+                
+        all_values = {}
+        for fpath in files_to_read:
+            live_path = os.path.join(SERVERS_ROOT, plugin_id, fpath)
+            all_values.update(ConfigManager.parse_live_config(live_path, fmt))
+            
+        return all_values
+
+    @staticmethod
     def apply_desired_config(plugin_id: str):
         manifest = ConfigManager.load_manifest(plugin_id)
         if not manifest or not manifest.get("config_meta"): return
@@ -155,110 +175,135 @@ class ConfigManager:
         if not os.path.exists(desired_path): return
 
         with open(desired_path, "r", encoding="utf-8") as f: desired_values = json.load(f)
-        live_path = os.path.join(SERVERS_ROOT, plugin_id, manifest["config_meta"].get("file_path"))
-
-        lines = []
-        if os.path.exists(live_path):
-            with open(live_path, "r", encoding="utf-8", errors="ignore") as f: lines = f.readlines()
-        else: os.makedirs(os.path.dirname(live_path), exist_ok=True)
-
-        updated_keys = set()
-        new_lines = []
+        
+        default_file = manifest["config_meta"].get("file_path")
         fmt = manifest["config_meta"].get("format", "ini")
         
-        if fmt == "palworld_ini":
-            # For Palworld, we completely rewrite OptionSettings
-            # Find the [Script/Pal.PalGameWorldSettings] header
-            has_header = False
-            for line in lines:
-                if "[/Script/Pal.PalGameWorldSettings]" in line:
-                    has_header = True
-                    break
-                    
+        # Group keys by target file
+        file_groups = {}
+        key_sections = {}
+        for field in manifest["config_meta"].get("fields", []):
+            k = field["key"]
+            fpath = field.get("file_path", default_file)
+            section = field.get("section", "ServerSettings")
+            key_sections[k] = section
+            
+            if fpath not in file_groups: file_groups[fpath] = []
+            file_groups[fpath].append(k)
+
+        # Handle keys that are in desired_values but not in fields (fallback to default file)
+        for k in desired_values:
+            if k not in key_sections:
+                if default_file not in file_groups: file_groups[default_file] = []
+                if k not in file_groups[default_file]:
+                    file_groups[default_file].append(k)
+                    key_sections[k] = "ServerSettings" # Default section
+        
+        # Process each file group
+        for fpath, keys_for_file in file_groups.items():
+            if not fpath: continue
+            
+            live_path = os.path.join(SERVERS_ROOT, plugin_id, fpath)
+            lines = []
+            if os.path.exists(live_path):
+                with open(live_path, "r", encoding="utf-8", errors="ignore") as f: lines = f.readlines()
+            else: 
+                os.makedirs(os.path.dirname(live_path), exist_ok=True)
+                
+            desired_values_for_file = {k: desired_values[k] for k in keys_for_file if k in desired_values}
+            if not desired_values_for_file: continue
+            
+            updated_keys = set()
             new_lines = []
-            if not has_header:
-                new_lines.append("[/Script/Pal.PalGameWorldSettings]\n")
-            else:
+            
+            if fmt == "palworld_ini":
+                # For Palworld, we completely rewrite OptionSettings
+                # Find the [Script/Pal.PalGameWorldSettings] header
+                has_header = False
                 for line in lines:
-                    if not line.strip().startswith("OptionSettings="):
-                        new_lines.append(line)
+                    if "[/Script/Pal.PalGameWorldSettings]" in line:
+                        has_header = True
+                        break
                         
-            # Build the OptionSettings string
-            opt_parts = []
-            for k, v in desired_values.items():
-                if isinstance(v, bool):
-                    val_str = "True" if v else "False"
-                elif isinstance(v, (int, float)):
-                    if isinstance(v, float):
-                        val_str = f"{v:.6f}"
-                    else:
-                        val_str = str(v)
+                new_lines = []
+                if not has_header:
+                    new_lines.append("[/Script/Pal.PalGameWorldSettings]\n")
                 else:
-                    # Escape quotes in strings
-                    safe_v = str(v).replace('"', '\\"')
-                    val_str = f'"{safe_v}"'
-                opt_parts.append(f"{k}={val_str}")
-                
-            new_lines.append(f"OptionSettings=({','.join(opt_parts)})\n")
-            
-        else:
-            # Build key -> section mapping from manifest
-            key_sections = {}
-            for field in manifest["config_meta"].get("fields", []):
-                key_sections[field["key"]] = field.get("section", "ServerSettings")
-
-            current_section = None
-            
-            for line in lines:
-                sec_match = re.match(r'^\s*\[(.*?)\]\s*$', line)
-                if sec_match:
-                    current_section = sec_match.group(1).strip()
-                    new_lines.append(line)
-                    continue
-
-                match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
-                if match:
-                    key = match.group(1).strip()
-                    if key in desired_values:
-                        expected_section = key_sections.get(key, "ServerSettings")
-                        
-                        # Reparatur-Logik: Falls der Key in der falschen oder in gar keiner Section steht,
-                        # wird er hier verworfen. Der Append-Block am Ende fügt ihn dann korrekt in die
-                        # richtige Section ein.
-                        if current_section != expected_section:
-                            continue
-
-                        val = desired_values[key]
-                        val_str = "True" if val is True else ("False" if val is False else str(val))
-                        new_lines.append(f"{key}={val_str}\n")
-                        updated_keys.add(key)
-                        continue
-                new_lines.append(line)
-                
-            for k, v in desired_values.items():
-                if k not in updated_keys:
-                    val_str = "True" if v is True else ("False" if v is False else str(v))
-                    section = key_sections.get(k, "ServerSettings")
-                    section_header = f"[{section}]"
-                    
-                    # Suche die Section im File
-                    section_idx = -1
-                    for i, line in enumerate(new_lines):
-                        if line.strip() == section_header:
-                            section_idx = i
-                            break
+                    for line in lines:
+                        if not line.strip().startswith("OptionSettings="):
+                            new_lines.append(line)
                             
-                    if section_idx != -1:
-                        # Füge direkt unter dem gefundenen Section-Header ein
-                        new_lines.insert(section_idx + 1, f"{k}={val_str}\n")
+                # Build the OptionSettings string
+                opt_parts = []
+                for k, v in desired_values_for_file.items():
+                    if isinstance(v, bool):
+                        val_str = "True" if v else "False"
+                    elif isinstance(v, (int, float)):
+                        if isinstance(v, float):
+                            val_str = f"{v:.6f}"
+                        else:
+                            val_str = str(v)
                     else:
-                        # Section existiert noch nicht, hänge sie ans Ende an
-                        if new_lines and not new_lines[-1].endswith('\n'):
-                            new_lines[-1] += '\n'
-                        new_lines.append(f"\n{section_header}\n")
-                        new_lines.append(f"{k}={val_str}\n")
+                        # Escape quotes in strings
+                        safe_v = str(v).replace('"', '\\"')
+                        val_str = f'"{safe_v}"'
+                    opt_parts.append(f"{k}={val_str}")
+                    
+                new_lines.append(f"OptionSettings=({','.join(opt_parts)})\n")
+                
+            else:
+                current_section = None
+                
+                for line in lines:
+                    sec_match = re.match(r'^\s*\[(.*?)\]\s*$', line)
+                    if sec_match:
+                        current_section = sec_match.group(1).strip()
+                        new_lines.append(line)
+                        continue
 
-        with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
+                    match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
+                    if match:
+                        key = match.group(1).strip()
+                        if key in desired_values_for_file:
+                            expected_section = key_sections.get(key, "ServerSettings")
+                            
+                            # Reparatur-Logik: Falls der Key in der falschen oder in gar keiner Section steht,
+                            # wird er hier verworfen. Der Append-Block am Ende fügt ihn dann korrekt in die
+                            # richtige Section ein.
+                            if current_section != expected_section:
+                                continue
+
+                            val = desired_values_for_file[key]
+                            val_str = "True" if val is True else ("False" if val is False else str(val))
+                            new_lines.append(f"{key}={val_str}\n")
+                            updated_keys.add(key)
+                            continue
+                    new_lines.append(line)
+                    
+                for k, v in desired_values_for_file.items():
+                    if k not in updated_keys:
+                        val_str = "True" if v is True else ("False" if v is False else str(v))
+                        section = key_sections.get(k, "ServerSettings")
+                        section_header = f"[{section}]"
+                        
+                        # Suche die Section im File
+                        section_idx = -1
+                        for i, line in enumerate(new_lines):
+                            if line.strip() == section_header:
+                                section_idx = i
+                                break
+                                
+                        if section_idx != -1:
+                            # Füge direkt unter dem gefundenen Section-Header ein
+                            new_lines.insert(section_idx + 1, f"{k}={val_str}\n")
+                        else:
+                            # Section existiert noch nicht, hänge sie ans Ende an
+                            if new_lines and not new_lines[-1].endswith('\n'):
+                                new_lines[-1] += '\n'
+                            new_lines.append(f"\n{section_header}\n")
+                            new_lines.append(f"{k}={val_str}\n")
+
+            with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
 
 
     @staticmethod

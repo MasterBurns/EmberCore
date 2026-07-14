@@ -1081,13 +1081,12 @@ def get_server_config(plugin_id: str):
     
     # Add file path to defined fields
     for f in fields:
-        f["file"] = config_file_path
+        f["file"] = f.get("file_path", config_file_path)
         
     known_keys = {f["key"] for f in fields}
     merged_values = {f["key"]: f.get("default") for f in fields}
 
-    live_path = os.path.join(SERVERS_ROOT, plugin_id, config_file_path)
-    live_values = ConfigManager.parse_live_config(live_path, manifest["config_meta"].get("format", "ini"))
+    live_values = ConfigManager.get_full_live_config(plugin_id)
 
     for k, v in live_values.items():
         if k in known_keys: merged_values[k] = v
