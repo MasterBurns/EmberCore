@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.4",
+  "build_date": "2026-07-14",
+  "changelog": [
+    "FEATURE: Multi-File Config Support integriert. Conan Exiles Passwörter (Engine.ini vs ServerSettings.ini) werden nun sauber auf die jeweiligen Spieldateien verteilt, wodurch Server-Passwörter nun endlich vom Spiel akzeptiert werden."
+  ]
+  },
+  {
   "version": "v0.2.0.3",
   "build_date": "2026-07-14",
   "changelog": [
