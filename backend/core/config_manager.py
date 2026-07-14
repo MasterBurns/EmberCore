@@ -202,6 +202,11 @@ class ConfigManager:
             new_lines.append(f"OptionSettings=({','.join(opt_parts)})\n")
             
         else:
+            # Build key -> section mapping from manifest
+            key_sections = {}
+            for field in manifest["config_meta"].get("fields", []):
+                key_sections[field["key"]] = field.get("section", "ServerSettings")
+
             for line in lines:
                 match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
                 if match:
@@ -217,7 +222,25 @@ class ConfigManager:
             for k, v in desired_values.items():
                 if k not in updated_keys:
                     val_str = "True" if v is True else ("False" if v is False else str(v))
-                    new_lines.append(f"{k}={val_str}\n")
+                    section = key_sections.get(k, "ServerSettings")
+                    section_header = f"[{section}]"
+                    
+                    # Suche die Section im File
+                    section_idx = -1
+                    for i, line in enumerate(new_lines):
+                        if line.strip() == section_header:
+                            section_idx = i
+                            break
+                            
+                    if section_idx != -1:
+                        # Füge direkt unter dem gefundenen Section-Header ein
+                        new_lines.insert(section_idx + 1, f"{k}={val_str}\n")
+                    else:
+                        # Section existiert noch nicht, hänge sie ans Ende an
+                        if new_lines and not new_lines[-1].endswith('\n'):
+                            new_lines[-1] += '\n'
+                        new_lines.append(f"\n{section_header}\n")
+                        new_lines.append(f"{k}={val_str}\n")
 
         with open(live_path, "w", encoding="utf-8") as f: f.writelines(new_lines)
 

@@ -87,11 +87,13 @@ config_meta:
     - key: "SessionName"
       label: "Server Name"
       type: "text"
+      section: "SessionSettings"
       default: "EmberCore ASA Server"
       
     - key: "ServerPassword"
       label: "Server Passwort (Leer = Öffentlich)"
       type: "text"
+      section: "ServerSettings"
       default: ""
       
     - key: "ServerAdminPassword"
@@ -102,6 +104,7 @@ config_meta:
     - key: "MaxPlayers"
       label: "Maximale Spieler"
       type: "number"
+      section: "SessionSettings"
       default: 20
 
     # --- GAMEPLAY MULTIPLIKATOREN ---

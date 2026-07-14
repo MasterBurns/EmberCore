@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.1.9.25",
+  "build_date": "2026-07-14",
+  "changelog": [
+    "BUGFIX: ConfigManager repariert! Unreal Engine Server (wie ASA und Conan Exiles) haben ServerNamen, Passwörter etc. ignoriert, da die INI-Sections (z.B. [SessionSettings] oder [ServerSettings]) beim Erstellen einer leeren Config gefehlt haben. Der Manager ist nun Section-Aware."
+  ]
+  },
+  {
   "version": "v0.2.0.0",
   "build_date": "2026-07-14",
   "changelog": [
