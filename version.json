@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.3",
+  "build_date": "2026-07-14",
+  "changelog": [
+    "BUGFIX: Server-Sichtbarkeit drastisch verbessert. EmberCore injiziert essenzielle Parameter (wie SessionName, ServerName und MultiHome) nun direkt dynamisch beim Serverstart in die Kommandozeile (Dynamic Arg Mapping). Dies umgeht fehleranfällige INI-Prioritäten von ASA und repariert die fehlende Namensauflösung in Conan Exiles komplett."
+  ]
+  },
+  {
   "version": "v0.2.0.2",
   "build_date": "2026-07-14",
   "changelog": [

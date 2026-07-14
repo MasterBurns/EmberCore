@@ -861,6 +861,30 @@ def start(plugin_id: str):
 
     args = manifest.get("default_args", []).copy()
 
+    # === DYNAMIC ARGUMENT INJECTION (arg_mapping) ===
+    # Erlaubt das direkte Einspritzen von Werten wie ServerName in die Kommandozeile
+    # um z.B. Probleme mit fehlerhaften INI-Zuordnungen der Spiele zu umgehen.
+    desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+    if os.path.exists(desired_path):
+        try:
+            with open(desired_path, "r", encoding="utf-8") as f:
+                desired_data = json.load(f)
+                
+            arg_mapping = manifest.get("config_meta", {}).get("arg_mapping", {})
+            for key, template in arg_mapping.items():
+                if key in desired_data:
+                    val = str(desired_data[key])
+                    # Für ASA: Argumente, die mit ? anfangen, an den Map-String anhängen
+                    if template.startswith("?"):
+                        if args and ("?" in args[0] or args[0].endswith("_WP") or args[0].lower() in ["theisland", "scorchedearth", "aberration"]):
+                            args[0] += template.replace("{value}", val)
+                    else:
+                        args.append(template.replace("{value}", val))
+                        
+            logger.info(f"[*] Arg Mapping: {len(arg_mapping)} Parameter in Kommandozeile injiziert.")
+        except Exception as e:
+            logger.error(f"[!] Fehler beim Arg Mapping: {e}")
+
     # === CUSTOM START PARAMETERS & KARTEN-INJECTOR ===
     startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
     if os.path.exists(startup_file):

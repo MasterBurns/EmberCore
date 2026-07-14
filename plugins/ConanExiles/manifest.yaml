@@ -6,6 +6,7 @@ steam_app_id: 443030
 executable_windows: "ConanSandboxServer.exe"
 default_args:
   - "-log"
+  - "-MultiHome=0.0.0.0"
   - "-Port=7777"
   - "-QueryPort=27015"
 network_meta:
@@ -58,7 +59,10 @@ diagnostics:
 # --- Vollständige Konfigurations-Struktur für das Web-UI ---
 config_meta:
   file_path: "ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini"
-  format: "key_value"
+  format: "ini"
+  arg_mapping:
+    ServerName: "-ServerName=\"{value}\""
+    MaxPlayers: "-MaxPlayers={value}"
   fields:
     # -- Basis-Einstellungen --
     - key: "ServerName"
