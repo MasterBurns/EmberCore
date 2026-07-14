@@ -207,11 +207,27 @@ class ConfigManager:
             for field in manifest["config_meta"].get("fields", []):
                 key_sections[field["key"]] = field.get("section", "ServerSettings")
 
+            current_section = None
+            
             for line in lines:
+                sec_match = re.match(r'^\s*\[(.*?)\]\s*$', line)
+                if sec_match:
+                    current_section = sec_match.group(1).strip()
+                    new_lines.append(line)
+                    continue
+
                 match = re.match(r'^\s*([^=;#]+)\s*=\s*(.*)$', line)
                 if match:
                     key = match.group(1).strip()
                     if key in desired_values:
+                        expected_section = key_sections.get(key, "ServerSettings")
+                        
+                        # Reparatur-Logik: Falls der Key in der falschen oder in gar keiner Section steht,
+                        # wird er hier verworfen. Der Append-Block am Ende fügt ihn dann korrekt in die
+                        # richtige Section ein.
+                        if current_section != expected_section:
+                            continue
+
                         val = desired_values[key]
                         val_str = "True" if val is True else ("False" if val is False else str(val))
                         new_lines.append(f"{key}={val_str}\n")

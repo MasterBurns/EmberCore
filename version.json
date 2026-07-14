@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.2",
+  "build_date": "2026-07-14",
+  "changelog": [
+    "FEATURE: Automatische Reparatur-Logik für korrupte Konfigurationsdateien integriert. Alte Configs (z.B. von ASA oder Conan Exiles), bei denen Einstellungen wie der ServerName versehentlich ohne Sektion ans Ende der Datei geschrieben wurden, werden beim nächsten Serverstart nun vollautomatisch in die korrekten Sektionen verschoben."
+  ]
+  },
+  {
   "version": "v0.1.9.25",
   "build_date": "2026-07-14",
   "changelog": [
