@@ -861,13 +861,23 @@ def start(plugin_id: str):
 
     args = manifest.get("default_args", []).copy()
 
-    # === KARTEN-INJECTOR ===
+    # === CUSTOM START PARAMETERS & KARTEN-INJECTOR ===
     startup_file = os.path.join(DATA_ROOT, plugin_id, "startup.json")
-    if os.path.exists(startup_file) and args and "?" in args[0]:
+    if os.path.exists(startup_file):
         try:
             with open(startup_file, "r") as f:
-                saved_map = json.load(f).get("map")
-                if saved_map:
+                startup_data = json.load(f)
+                
+                # Custom Start Parameters
+                custom_params = startup_data.get("custom_start_parameters", "").strip()
+                if custom_params:
+                    import shlex
+                    args.extend(shlex.split(custom_params))
+                    logger.info(f"[*] Custom Parameters Injector: Hänge '{custom_params}' an.")
+                
+                # Karten-Injector
+                saved_map = startup_data.get("map")
+                if saved_map and args and "?" in args[0]:
                     parts = args[0].split("?", 1)
                     args[0] = f"{saved_map}?{parts[1]}"
                     logger.info(f"[*] Map Override: Starte Server mit Karte '{saved_map}'")
@@ -1378,6 +1388,8 @@ def save_server_startup(plugin_id: str, payload: dict = Body(...)):
         data["show_external_console"] = payload.get("show_external_console")
     if "show_in_discord" in payload:
         data["show_in_discord"] = payload.get("show_in_discord")
+    if "custom_start_parameters" in payload:
+        data["custom_start_parameters"] = payload.get("custom_start_parameters")
         
     with open(startup_file, "w") as f:
         json.dump(data, f)

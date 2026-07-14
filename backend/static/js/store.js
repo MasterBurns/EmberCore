@@ -237,7 +237,7 @@ export const api = {
     },
     async saveMap() {
         if (store.startupData?.enabled) {
-            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console, show_in_discord: store.startupData.show_in_discord }) });
+            await fetch(`/api/server/startup/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected_map: store.startupData.selected_map, show_external_console: store.startupData.show_external_console, show_in_discord: store.startupData.show_in_discord, custom_start_parameters: store.startupData.custom_start_parameters }) });
         }
     },
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },

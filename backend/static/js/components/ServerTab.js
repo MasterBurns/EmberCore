@@ -76,6 +76,10 @@ export default {
                             <input type="checkbox" v-model="store.startupData.show_in_discord" @change="api.saveMap()" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
                             Im Discord Live Dashboard anzeigen
                         </label>
+                        <div class="mt-4">
+                            <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Zusätzliche Startparameter (Optional)</label>
+                            <input type="text" v-model="store.startupData.custom_start_parameters" @change="api.saveMap()" placeholder="z.B. -log -NoBattlEye" class="w-full bg-[#0a0a0a] border border-gray-800 hover:border-gray-700 rounded-lg p-3 text-sm text-white focus:border-orange-500 outline-none transition shadow-sm">
+                        </div>
                         <p class="text-[10px] text-gray-500 mt-2">Wird beim nächsten Start des Servers geladen. Savegames sind oft an die Map gebunden.</p>
                     </div>
 
