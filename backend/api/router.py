@@ -16,6 +16,7 @@ from core.steamcmd_manager import SteamCMDManager
 from core.backup_manager import BackupManager
 from core.discord_manager import discord_manager
 from core.cluster_manager import cluster_manager  # NEU IMPORTIERT
+from core import install_manager
 
 steam_manager = SteamCMDManager(base_dir=SERVERS_ROOT)
 backup_manager = BackupManager(base_dir=EXE_DIR)
@@ -418,55 +419,63 @@ class RenamePayload(BaseModel):
 
 @router.post("/server/rename/{plugin_id}")
 async def rename_server(plugin_id: str, payload: RenamePayload):
-    import re
-    from core.env import PLUGINS_ROOT, DEV_PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT
-    from core.server_manager import server_manager
-    
-    new_id = payload.new_id.strip()
-    if not re.match(r'^[a-z0-9_]+$', new_id):
-        return {"status": "error", "message": "Die neue ID darf nur Kleinbuchstaben, Zahlen und Unterstriche enthalten."}
+    try:
+        import re
+        from core.env import PLUGINS_ROOT, DEV_PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT
+        from core.server_manager import server_manager
         
-    _, _, is_dev = ConfigManager.get_plugin_paths(plugin_id)
-    if is_dev:
-        return {"status": "error", "message": "DEV-Plugins können nicht umbenannt werden."}
-        
-    if server_manager.is_server_online(plugin_id):
-        return {"status": "error", "message": "Der Server muss gestoppt sein, bevor er umbenannt werden kann."}
-        
-    # Check if new_id already exists anywhere
-    if os.path.exists(os.path.join(PLUGINS_ROOT, new_id)) or \
-       os.path.exists(os.path.join(DEV_PLUGINS_ROOT, new_id)) or \
-       os.path.exists(os.path.join(SERVERS_ROOT, new_id)) or \
-       os.path.exists(os.path.join(DATA_ROOT, new_id)):
-        return {"status": "error", "message": "Die neue ID existiert bereits."}
-        
-    res = ConfigManager.rename_plugin(plugin_id, new_id)
-    if res["status"] == "error":
-        return res
-        
-    warnings = res.get("warnings", [])
-    
-    # Update memory caches
-    if plugin_id in game_update_cache:
-        game_update_cache[new_id] = game_update_cache[plugin_id]
-        del game_update_cache[plugin_id]
-    if plugin_id in disk_cache:
-        disk_cache[new_id] = disk_cache[plugin_id]
-        del disk_cache[plugin_id]
-        
-    # Update Firewall Rules
-    import platform
-    import subprocess
-    if platform.system() == "Windows":
-        try:
-            # Delete old rules
-            subprocess.run(["powershell", "-Command", f"Remove-NetFirewallRule -DisplayName 'EmberCore_{plugin_id}_*' -ErrorAction SilentlyContinue"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            # Recreate with new ID
-            setup_network(new_id)
-        except Exception as e:
-            warnings.append(f"Konnte Firewall-Regeln nicht migrieren: {e}")
+        new_id = payload.new_id.strip()
+        if not re.match(r'^[a-z0-9_]+$', new_id):
+            return {"status": "error", "message": "Die neue ID darf nur Kleinbuchstaben, Zahlen und Unterstriche enthalten."}
             
-    return {"status": "success", "new_id": new_id, "warnings": warnings}
+        _, _, is_dev = ConfigManager.get_plugin_paths(plugin_id)
+        if is_dev:
+            return {"status": "error", "message": "DEV-Plugins können nicht umbenannt werden."}
+            
+        if server_manager.is_server_online(plugin_id):
+            return {"status": "error", "message": "Der Server muss gestoppt sein, bevor er umbenannt werden kann."}
+            
+        status = install_manager.get_status(plugin_id)
+        if status.get("status") == "running":
+            return {"status": "error", "message": "Installation/Update läuft gerade."}
+            
+        # Check if new_id already exists anywhere
+        if os.path.exists(os.path.join(PLUGINS_ROOT, new_id)) or \
+           os.path.exists(os.path.join(DEV_PLUGINS_ROOT, new_id)) or \
+           os.path.exists(os.path.join(SERVERS_ROOT, new_id)) or \
+           os.path.exists(os.path.join(DATA_ROOT, new_id)):
+            return {"status": "error", "message": "Die neue ID existiert bereits."}
+            
+        res = ConfigManager.rename_plugin(plugin_id, new_id)
+        if res["status"] == "error":
+            return res
+            
+        warnings = res.get("warnings", [])
+        
+        # Update memory caches
+        if plugin_id in game_update_cache:
+            game_update_cache[new_id] = game_update_cache[plugin_id]
+            del game_update_cache[plugin_id]
+        if plugin_id in disk_cache:
+            disk_cache[new_id] = disk_cache[plugin_id]
+            del disk_cache[plugin_id]
+            
+        # Update Firewall Rules
+        import platform
+        import subprocess
+        if platform.system() == "Windows":
+            try:
+                # Delete old rules
+                subprocess.run(["powershell", "-Command", f"Remove-NetFirewallRule -DisplayName 'EmberCore_{plugin_id}_*' -ErrorAction SilentlyContinue"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                # Recreate with new ID
+                setup_network(new_id)
+            except Exception as e:
+                warnings.append(f"Konnte Firewall-Regeln nicht migrieren: {e}")
+                
+        return {"status": "success", "new_id": new_id, "warnings": warnings}
+    except Exception as e:
+        logger.exception(f"[!] Unerwarteter Fehler im Rename-Endpoint: {e}")
+        return {"status": "error", "message": f"Unerwarteter Systemfehler: {str(e)}"}
 
 @router.get("/server/manifest/{plugin_id}")
 def get_server_manifest(plugin_id: str):
@@ -546,6 +555,17 @@ def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_
             with open(os.path.join(mods_dir, "mods_db.json"), "w", encoding="utf-8") as f:
                 json.dump(mods_db, f, indent=2)
             logger.info(f"[*] {len(mods_db)} Mods aus AMP Konfiguration importiert.")
+            
+            import asyncio
+            from core.modmeta import refresh_mod_metadata
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(refresh_mod_metadata(plugin_id))
+                else:
+                    loop.run_until_complete(refresh_mod_metadata(plugin_id))
+            except Exception:
+                asyncio.run(refresh_mod_metadata(plugin_id))
             
         if mode == "move":
             IMPORT_TASKS[task_id]["message"] = "Räume alten Ordner auf..."
@@ -818,25 +838,25 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
 # SERVER VERWALTUNG ROUTEN
 # ==========================================
 @router.post("/server/install/{plugin_id}")
-def install_server(plugin_id: str, req: InstallRequest = None):
+def install_server(plugin_id: str, background_tasks: BackgroundTasks, req: InstallRequest = None):
     ConfigManager.sync_manifest_from_cloud(plugin_id)
     manifest = ConfigManager.load_manifest(plugin_id)
     if not manifest: raise HTTPException(status_code=404, detail="Manifest nicht gefunden")
 
     logger.info(f"[*] Update-Prozess für '{plugin_id}' gestartet...")
-    res = steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
+    return install_manager.start_update(plugin_id, manifest)
 
-    mods_meta = manifest.get("mods_meta", {})
-    if mods_meta and "steam_workshop_appid" in mods_meta:
-        mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
-        if os.path.exists(mods_file):
-            with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
-            if current_mods:
-                steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
+@router.get("/server/install/status/{plugin_id}")
+def get_install_status(plugin_id: str):
+    return install_manager.get_status(plugin_id)
 
-    rebuild_modlist(plugin_id, manifest)
-    if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
-    return res
+@router.get("/server/install/status_all")
+def get_all_install_status():
+    return install_manager.INSTALL_TASKS
+
+@router.post("/server/install/cancel/{plugin_id}")
+def cancel_install(plugin_id: str):
+    return install_manager.cancel(plugin_id)
 
 @router.post("/server/check-updates/{plugin_id}")
 async def force_check_game_updates(plugin_id: str):
@@ -864,7 +884,11 @@ async def force_check_game_updates(plugin_id: str):
     return {"status": "error", "message": "Konnte Daten nicht prüfen."}
 
 @router.post("/server/start/{plugin_id}")
-def start(plugin_id: str):
+def start(plugin_id: str, background_tasks: BackgroundTasks):
+    status = install_manager.get_status(plugin_id)
+    if status.get("status") == "running":
+        return {"status": "error", "message": "Installation/Update läuft gerade."}
+
     if server_manager.is_server_online(plugin_id):
         return {"status": "error", "message": "Der Server läuft bereits im Hintergrund!"}
 
@@ -878,18 +902,12 @@ def start(plugin_id: str):
             auto_update = json.load(df).get("AutoUpdateOnStart")
 
     if auto_update in [True, "True", "true", 1]:
-        logger.info("[*] Auto-Update ist an! Synchronisiere Daten vor dem Start...")
-        steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-
-        mods_meta = manifest.get("mods_meta", {})
-        if mods_meta and "steam_workshop_appid" in mods_meta:
-            mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
-            if os.path.exists(mods_file):
-                with open(mods_file, "r", encoding="utf-8") as f: current_mods = json.load(f)
-                if current_mods:
-                    steam_manager.update_workshop_mods(plugin_id, mods_meta.get("steam_workshop_appid"), current_mods)
-
-        if plugin_id in game_update_cache: game_update_cache[plugin_id]["available"] = False
+        logger.info("[*] Auto-Update ist an! Starte Update-Task...")
+        res = install_manager.start_update(plugin_id, manifest, auto_start=True)
+        if res.get("status") == "success":
+            return {"status": "info", "message": "Auto-Update läuft – Server startet nach Abschluss automatisch."}
+        else:
+            logger.error(f"Auto-Update konnte nicht gestartet werden: {res.get('message')}")
 
     rebuild_modlist(plugin_id, manifest)
     ConfigManager.apply_desired_config(plugin_id)
@@ -999,6 +1017,9 @@ def start(plugin_id: str):
         ConfigManager.enforce_cluster_rules(plugin_id, manifest)
         args.extend(cluster_info["args"])
 
+    from core.modmeta import refresh_mod_metadata
+    background_tasks.add_task(refresh_mod_metadata, plugin_id)
+
     return server_manager.start_server(plugin_id, executable_path, args)
 
 @router.post("/server/stop/{plugin_id}")
@@ -1040,8 +1061,8 @@ def apply_fix(plugin_id: str, fix_type: str):
     if not manifest: return {"status": "error", "message": "Manifest nicht gefunden"}
 
     if fix_type == "update_server":
-        steam_manager.install_or_update_app(manifest.get("steam_app_id"), plugin_id, force_windows=platform.system() == "Linux" and "executable_windows" in manifest)
-        return {"status": "success", "message": "Server repariert."}
+        install_manager.start_update(plugin_id, manifest)
+        return {"status": "success", "message": "Server-Update gestartet."}
     elif fix_type == "restore_backup":
         backups = backup_manager.list_backups(plugin_id)
         if not backups: return {"status": "error", "message": "Kein Backup gefunden!"}
@@ -1055,6 +1076,12 @@ def get_server_mods(plugin_id: str):
     if os.path.exists(mods_file):
         with open(mods_file, "r", encoding="utf-8") as f: return json.load(f)
     return []
+
+@router.post("/server/mods/resolve/{plugin_id}")
+async def resolve_mods_endpoint(plugin_id: str):
+    from core.modmeta import refresh_mod_metadata
+    res = await refresh_mod_metadata(plugin_id)
+    return res
 
 @router.post("/server/mods/add/{plugin_id}/{mod_id}")
 async def add_server_mod(plugin_id: str, mod_id: str):
@@ -1081,8 +1108,13 @@ async def add_server_mod(plugin_id: str, mod_id: str):
                         mod_version = datetime.fromtimestamp(updated_ts).strftime("%d.%m.%Y") if updated_ts else "1.0.0"
         except: pass
     elif provider == "curseforge":
-        mod_name = f"CurseForge Mod ({mod_id})"
         mod_version = "Auto-Update durch Server"
+        from core.modmeta import resolve_curseforge_mods
+        resolved = await resolve_curseforge_mods(plugin_id, [mod_id])
+        if mod_id in resolved:
+            mod_name = resolved[mod_id]
+        else:
+            mod_name = f"CurseForge Mod ({mod_id})"
         
     mods_file = os.path.join(DATA_ROOT, plugin_id, "mods_db.json")
     os.makedirs(os.path.dirname(mods_file), exist_ok=True)
@@ -1096,6 +1128,113 @@ async def add_server_mod(plugin_id: str, mod_id: str):
 
     rebuild_modlist(plugin_id, manifest)
     return {"status": "success", "message": f"Mod '{mod_name}' zur Liste hinzugefügt. Bitte klicke nun auf 'Install / Update', um sie herunterzuladen!"}
+
+class ModTransferRequest(BaseModel):
+    source_plugin_id: str
+    target_plugin_ids: list[str]
+    mode: str = "merge" # merge oder replace
+    copy_files: bool = False
+
+@router.post("/server/mods/transfer")
+def transfer_mods(req: ModTransferRequest):
+    source_id = req.source_plugin_id
+    src_mods_file = os.path.join(DATA_ROOT, source_id, "mods_db.json")
+    if not os.path.exists(src_mods_file):
+        return {"status": "error", "message": "Quelle hat keine Mods installiert."}
+        
+    with open(src_mods_file, "r", encoding="utf-8") as f:
+        src_mods = json.load(f)
+        
+    src_manifest = ConfigManager.load_manifest(source_id)
+    provider = src_manifest.get("mods_meta", {}).get("provider", "steam") if src_manifest else "steam"
+    
+    results = []
+    transferred_count = len(src_mods)
+    
+    import shutil
+    for target_id in req.target_plugin_ids:
+        if target_id == source_id: continue
+        target_manifest = ConfigManager.load_manifest(target_id)
+        if not target_manifest: continue
+        
+        target_mods_file = os.path.join(DATA_ROOT, target_id, "mods_db.json")
+        target_mods = []
+        if os.path.exists(target_mods_file):
+            with open(target_mods_file, "r", encoding="utf-8") as f:
+                target_mods = json.load(f)
+                
+        warnings = []
+        added = 0
+        
+        if req.mode == "replace":
+            new_mods = list(src_mods)
+            added = len(new_mods)
+        else: # merge
+            new_mods = list(target_mods)
+            for sm in src_mods:
+                existing = next((m for m in new_mods if str(m["id"]) == str(sm["id"])), None)
+                if not existing:
+                    new_mods.append(sm)
+                    added += 1
+                else:
+                    # Update name if placeholder
+                    t_name = existing.get("name", "")
+                    if t_name.startswith("CurseForge Mod (") or t_name.startswith("Imported Mod (") or t_name.startswith("Mod (") or t_name == "unbekannt":
+                        existing["name"] = sm["name"]
+        
+        os.makedirs(os.path.dirname(target_mods_file), exist_ok=True)
+        with open(target_mods_file, "w", encoding="utf-8") as f:
+            json.dump(new_mods, f, indent=2)
+            
+        # Copy files logic
+        if req.copy_files:
+            if provider == "steam":
+                appid = target_manifest.get("mods_meta", {}).get("steam_workshop_appid")
+                if appid:
+                    src_ws = os.path.join(SERVERS_ROOT, source_id, "steamapps", "workshop", "content", str(appid))
+                    target_ws = os.path.join(SERVERS_ROOT, target_id, "steamapps", "workshop", "content", str(appid))
+                    if os.path.exists(src_ws):
+                        os.makedirs(target_ws, exist_ok=True)
+                        for sm in src_mods:
+                            m_id = str(sm["id"])
+                            s_dir = os.path.join(src_ws, m_id)
+                            t_dir = os.path.join(target_ws, m_id)
+                            if os.path.exists(s_dir) and not os.path.exists(t_dir):
+                                try:
+                                    shutil.copytree(s_dir, t_dir, copy_function=os.link)
+                                except Exception:
+                                    try:
+                                        shutil.copytree(s_dir, t_dir)
+                                    except Exception as e:
+                                        warnings.append(f"Konnte Mod {m_id} nicht kopieren: {e}")
+            elif provider == "curseforge":
+                src_mods_dir = os.path.join(SERVERS_ROOT, source_id, "ShooterGame", "Mods")
+                target_mods_dir = os.path.join(SERVERS_ROOT, target_id, "ShooterGame", "Mods")
+                if os.path.exists(src_mods_dir):
+                    os.makedirs(target_mods_dir, exist_ok=True)
+                    for f_name in os.listdir(src_mods_dir):
+                        if f_name.endswith(".pak"):
+                            s_file = os.path.join(src_mods_dir, f_name)
+                            t_file = os.path.join(target_mods_dir, f_name)
+                            if not os.path.exists(t_file):
+                                try:
+                                    os.link(s_file, t_file)
+                                except Exception:
+                                    try:
+                                        shutil.copy2(s_file, t_file)
+                                    except Exception as e:
+                                        warnings.append(f"Konnte {f_name} nicht kopieren: {e}")
+                                        
+        # Rebuild modlist
+        rebuild_modlist(target_id, target_manifest)
+        
+        results.append({
+            "plugin_id": target_id,
+            "added": added,
+            "warnings": warnings
+        })
+        
+    return {"status": "success", "transferred": transferred_count, "targets": results}
 
 @router.delete("/server/mods/delete/{plugin_id}/{mod_id}")
 def delete_server_mod(plugin_id: str, mod_id: str):
@@ -1119,7 +1258,11 @@ def _do_delete_mod(plugin_id: str, mod_id: str):
     return {"status": "success", "message": "Mod entfernt."}
 
 @router.delete("/server/delete/{plugin_id}")
-def delete_server_files(plugin_id: str):
+def delete_server(plugin_id: str):
+    status = install_manager.get_status(plugin_id)
+    if status.get("status") == "running":
+        return {"status": "error", "message": "Installation/Update läuft gerade."}
+        
     if server_manager.is_server_online(plugin_id): raise HTTPException(status_code=400, detail="Server läuft noch!")
     if os.path.exists(os.path.join(SERVERS_ROOT, plugin_id)): shutil.rmtree(os.path.join(SERVERS_ROOT, plugin_id))
     if os.path.exists(os.path.join(BACKUPS_ROOT, plugin_id)): shutil.rmtree(os.path.join(BACKUPS_ROOT, plugin_id))

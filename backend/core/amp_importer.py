@@ -65,22 +65,71 @@ def parse_amp_config(config_dir: str) -> dict:
 
     try:
         with open(amp_config_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if '=' not in line: continue
-                key, val = line.split('=', 1)
-                key, val = key.strip(), val.strip()
+            content = f.read()
+            
+        import json, re
+        # Versuche JSON parsing (Tolerant für trailing commas)
+        try:
+            clean_content = re.sub(r',\s*}', '}', content)
+            json_data = json.loads(clean_content)
+            for key, val in json_data.items():
                 k_lower = key.lower()
-                
-                if "sessionname" in k_lower or "servername" in k_lower: ext_conf["SessionName"] = val
-                elif "maxplayers" in k_lower: ext_conf["MaxPlayers"] = int(val) if val.isdigit() else 20
-                elif "map" in k_lower and "url" not in k_lower: ext_conf["Map"] = val
-                elif "serverpassword" in k_lower: ext_conf["ServerPassword"] = val
-                elif "adminpassword" in k_lower: ext_conf["ServerAdminPassword"] = val
-                elif "queryport" in k_lower: ext_conf["QueryPort"] = val
-                elif "rconport" in k_lower: ext_conf["RCONPort"] = val
-                elif "portnumber" in k_lower or "gameport" in k_lower: ext_conf["Port"] = val
+                v_str = str(val).strip()
+                if "instance" in k_lower or "friendly" in k_lower: ext_conf["InstanceName"] = v_str
+                elif "sessionname" in k_lower or "servername" in k_lower: ext_conf["SessionName"] = v_str
+                elif "maxplayers" in k_lower or "maxusers" in k_lower: ext_conf["MaxPlayers"] = int(v_str) if v_str.isdigit() else 20
+                elif "map" in k_lower and "url" not in k_lower: ext_conf["Map"] = v_str
+                elif "serverpassword" in k_lower: ext_conf["ServerPassword"] = v_str
+                elif "adminpassword" in k_lower: ext_conf["ServerAdminPassword"] = v_str
+                elif "queryport" in k_lower: ext_conf["QueryPort"] = v_str
+                elif "rconport" in k_lower: ext_conf["RCONPort"] = v_str
+                elif "portnumber" in k_lower or "gameport" in k_lower or k_lower == "port": ext_conf["Port"] = v_str
+        except Exception:
+            # Fallback zeilenbasiert
+            for line in content.splitlines():
+                if ':' in line or '=' in line:
+                    sep = '=' if '=' in line else ':'
+                    key, val = line.split(sep, 1)
+                    key = key.replace('"', '').strip()
+                    val = val.replace('"', '').strip().strip(',')
+                    k_lower = key.lower()
+                    if "instance" in k_lower or "friendly" in k_lower: ext_conf["InstanceName"] = val
+                    elif "sessionname" in k_lower or "servername" in k_lower: ext_conf["SessionName"] = val
+                    elif "maxplayers" in k_lower or "maxusers" in k_lower: ext_conf["MaxPlayers"] = int(val) if val.isdigit() else 20
+                    elif "map" in k_lower and "url" not in k_lower: ext_conf["Map"] = val
+                    elif "serverpassword" in k_lower: ext_conf["ServerPassword"] = val
+                    elif "adminpassword" in k_lower: ext_conf["ServerAdminPassword"] = val
+                    elif "queryport" in k_lower: ext_conf["QueryPort"] = val
+                    elif "rconport" in k_lower: ext_conf["RCONPort"] = val
+                    elif "portnumber" in k_lower or "gameport" in k_lower or k_lower == "port": ext_conf["Port"] = val
+                    
     except Exception as e:
         logger.error(f"[!] Fehler beim Parsen von AMPConfig.conf in {amp_config_path}: {e}")
+        
+    # Fallback auf GameUserSettings.ini, falls AMPConfig.conf nicht genug liefert
+    try:
+        sg_root = find_shootergame_root(config_dir)
+        if sg_root:
+            from core.config_manager import ConfigManager
+            live_data = ConfigManager.parse_live_config(os.path.dirname(sg_root), "GameUserSettings.ini")
+            if live_data:
+                server_settings = live_data.get("ServerSettings", {})
+                if "SessionName" not in ext_conf and "SessionName" in server_settings: ext_conf["SessionName"] = server_settings["SessionName"]
+                if "RCONPort" not in ext_conf and "RCONPort" in server_settings: ext_conf["RCONPort"] = server_settings["RCONPort"]
+                if "QueryPort" not in ext_conf and "QueryPort" in server_settings: ext_conf["QueryPort"] = server_settings["QueryPort"]
+                if "Port" not in ext_conf and "Port" in server_settings: ext_conf["Port"] = server_settings["Port"]
+                if "MaxPlayers" not in ext_conf and "MaxPlayers" in server_settings: ext_conf["MaxPlayers"] = server_settings["MaxPlayers"]
+    except Exception as e:
+        logger.warning(f"Fallback GameUserSettings.ini schlug fehl: {e}")
+
+    # Sanitisierung: Keine leeren Strings, None oder False
+    for k in list(ext_conf.keys()):
+        if ext_conf[k] in [None, False, "", "False", "None"]:
+            del ext_conf[k]
+            
+    if "InstanceName" not in ext_conf: ext_conf["InstanceName"] = os.path.basename(config_dir)
+    if "Map" not in ext_conf: ext_conf["Map"] = "Unbekannt"
+    if "Port" not in ext_conf: ext_conf["Port"] = 7777
 
     return ext_conf
 

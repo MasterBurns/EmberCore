@@ -1,5 +1,30 @@
 [
   {
+  "version": "v0.2.0.15",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "FEATURE: Server-Installation und Updates laufen jetzt komplett asynchron mit Live-Progress-Bar.",
+    "FEATURE: Installationen können nun jederzeit sicher abgebrochen werden, ohne Datenkorruption zu riskieren."
+  ]
+  },
+  {
+  "version": "v0.2.0.13",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "BUGFIX: AMP Import Crash-Schutz. Bereinigt alte CurseForge Mods und updatet den SteamCMD-Core nach dem Import.",
+    "BUGFIX: Server-Rename ist nun ausnahmesicher und blockiert das Backend nicht mehr bei Zugriffsfehlern.",
+    "BUGFIX: AMP Discovery erkennt nun zuverlässig JSON-artige Configs und liest Ports und Namen korrekt aus."
+  ]
+  },
+  {
+  "version": "v0.2.0.12",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "FEATURE: Mod-Namensauflösung für ASA! CurseForge-Mods werden nun intelligent anhand lokaler Dateien, Web-Scraping oder via offizieller CurseForge-API (falls Key hinterlegt) benannt statt nur als Platzhalter aufzutauchen.",
+    "FEATURE: Server-Mod-Transfer! Mods können jetzt ganz einfach mit einem Klick von einem Server auf beliebig viele andere Server kopiert oder gemerged werden. Auf Wunsch sogar inklusive physischer Dateien, um Downloads zu sparen."
+  ]
+  },
+  {
   "version": "v0.2.0.11",
   "build_date": "2026-08-09",
   "changelog": [

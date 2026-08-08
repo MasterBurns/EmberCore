@@ -96,6 +96,14 @@ export default {
                             <input type="text" v-model="store.sysConfig.amp_discovery_paths" @blur="api.saveSysConfig()" placeholder="z.B. /mnt/amp/instances" class="mt-2 w-full bg-gray-950 border border-gray-700 text-xs text-white p-2 rounded outline-none focus:border-orange-500 font-mono">
                         </div>
                     </div>
+                    
+                    <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                        <div class="w-full">
+                            <p class="text-sm font-bold text-gray-300">CurseForge API Key (Optional)</p>
+                            <p class="text-[10px] text-gray-500 mt-0.5">Für die offizielle ASA Mod-Namensauflösung.</p>
+                            <input type="password" v-model="store.sysConfig.curseforge_api_key" @blur="api.saveSysConfig()" placeholder="x-api-key..." class="mt-2 w-full bg-gray-950 border border-gray-700 text-xs text-white p-2 rounded outline-none focus:border-orange-500 font-mono">
+                        </div>
+                    </div>
 
                     <button @click="api.openLogViewer()" class="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold p-2.5 rounded-lg text-xs transition border border-gray-700 cursor-pointer">📄 System-Logbuch ansehen</button>
                 </div>

@@ -17,8 +17,7 @@ export default {
             
             if (!newId || newId === store.activeServerId) return;
             
-            store.isActionLoading = true;
-            store.loadingMessage = "Server wird umbenannt...";
+            api.setServerLoading(store.activeServerId, "Server wird umbenannt...");
             
             try {
                 const res = await fetch(`/api/server/rename/${store.activeServerId}`, {
@@ -44,8 +43,89 @@ export default {
                 api.alert('Netzwerkfehler', 'Fehler');
             }
             
+            api.setServerLoading(store.activeServerId, null);
+        },
+        async resolveMods() {
+            api.setServerLoading(store.activeServerId, "Löse Mods auf...");
+            try {
+                const res = await fetch(\`/api/server/mods/resolve/\${store.activeServerId}\`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    api.alert(\`Es wurden \${data.resolved_count} Mods aufgelöst.\`, 'Erfolgreich');
+                    await api.loadServerMods(store.activeServerId);
+                } else {
+                    api.alert(data.message, 'Fehler');
+                }
+            } catch (e) {
+                api.alert('Netzwerkfehler', 'Fehler');
+            }
+            api.setServerLoading(store.activeServerId, null);
+        },
+        openModTransfer() {
+            this.transferTargets = [];
+            this.transferMode = 'merge';
+            this.transferCopyFiles = false;
+            this.showTransferModal = true;
+        },
+        async submitModTransfer() {
+            if (this.transferTargets.length === 0) {
+                api.alert('Bitte wähle mindestens ein Ziel aus.', 'Fehler');
+                return;
+            }
+            this.showTransferModal = false;
+            api.setServerLoading(store.activeServerId, "Übertrage Mods...");
+            try {
+                const payload = {
+                    source_plugin_id: store.activeServerId,
+                    target_plugin_ids: this.transferTargets,
+                    mode: this.transferMode,
+                    copy_files: this.transferCopyFiles
+                };
+                const res = await fetch('/api/server/mods/transfer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    api.alert(\`Transfer abgeschlossen.\\n\${data.transferred} Mods übertragen auf \${data.targets.length} Server.\`, 'Erfolgreich');
+                } else {
+                    api.alert(data.message, 'Fehler');
+                }
+            } catch (e) {
+                api.alert('Netzwerkfehler', 'Fehler');
+            }
+            api.setServerLoading(store.activeServerId, null);
+        },
+        async repairMods() {
+            const isConfirmed = await api.confirm(
+                "Mods-Cache reparieren",
+                "Möchtest du den Mods-Cache wirklich leeren?\nDies löscht alle heruntergeladenen Mod-Dateien und erzwingt beim nächsten Start einen sauberen Download.\n(Hilft oft bei Abstürzen nach AMP-Importen)"
+            );
+            if (!isConfirmed) return;
+            
+            api.setServerLoading(store.activeServerId, "Repariere Mods...");
+            try {
+                const res = await fetch(`/api/server/repair-mods/${store.activeServerId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    api.alert(data.message, 'Erfolgreich');
+                } else {
+                    api.alert(data.message, 'Fehler');
+                }
+            } catch (e) {
+                api.alert('Netzwerkfehler', 'Fehler');
+            }
             store.isActionLoading = false;
         }
+    },
+    data() {
+        return {
+            showTransferModal: false,
+            transferTargets: [],
+            transferMode: 'merge',
+            transferCopyFiles: false
+        };
     },
     setup() { 
         const formatLog = (text) => {
@@ -108,7 +188,7 @@ export default {
                             <h3 class="text-blue-400 font-bold uppercase tracking-wider text-xs flex items-center gap-2">🔄 Spiel-Update auf Steam verfügbar!</h3>
                             <p class="text-xs text-blue-200 mt-1">Installierter Build: <span class="font-mono">{{ store.serverStats.update_info.local }}</span> | Aktuell auf Steam: <span class="font-mono">{{ store.serverStats.update_info.remote }}</span></p>
                         </div>
-                        <button @click="api.installServer()" :disabled="store.isActionLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded transition cursor-pointer shadow">Jetzt aktualisieren</button>
+                        <button @click="api.installServer()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading || store.installTasks[store.selectedPlugin]?.status === 'running' || store.installTasks[store.selectedPlugin]?.status === 'queued'" class="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded transition cursor-pointer shadow">Jetzt aktualisieren</button>
                     </div>
                     
                     <div v-if="store.startupData?.enabled" class="bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-md">
@@ -135,17 +215,33 @@ export default {
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <button @click="api.installServer()" :disabled="store.isActionLoading || store.serverStats?.status === 'online'" :class="(store.serverStats?.update_info?.available) ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.5)] border border-orange-400' : 'bg-blue-600 hover:bg-blue-500 border border-transparent'" class="disabled:bg-gray-950 disabled:border-gray-900 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition cursor-pointer text-sm flex flex-col items-center justify-center text-center">
+                        <button @click="api.installServer()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading || store.serverStats?.status === 'online' || store.installTasks[store.selectedPlugin]?.status === 'running' || store.installTasks[store.selectedPlugin]?.status === 'queued'" :class="(store.serverStats?.update_info?.available) ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.5)] border border-orange-400' : 'bg-blue-600 hover:bg-blue-500 border border-transparent'" class="disabled:bg-gray-950 disabled:border-gray-900 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition cursor-pointer text-sm flex flex-col items-center justify-center text-center">
                             <span>{{ (store.serverStats?.update_info?.available) ? '🔄 Update verfügbar' : '📦 Install / Update' }}</span>
                         </button>
-                        <button @click="api.checkGameUpdate()" :disabled="store.isActionLoading" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm border border-gray-700">🔎 Update prüfen</button>
-                        <button @click="api.startServer()" :disabled="store.isActionLoading || store.serverStats?.status === 'online'" class="bg-green-600 hover:bg-green-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">▶️ Server Starten</button>
-                        <button @click="api.stopServer()" :disabled="store.isActionLoading || store.serverStats?.status === 'offline'" class="bg-red-600 hover:bg-red-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">⏹️ Server Stoppen</button>
+                        <button @click="api.checkGameUpdate()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading || store.installTasks[store.selectedPlugin]?.status === 'running' || store.installTasks[store.selectedPlugin]?.status === 'queued'" class="bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm border border-gray-700">🔎 Update prüfen</button>
+                        <button @click="api.startServer()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading || store.serverStats?.status === 'online' || store.installTasks[store.selectedPlugin]?.status === 'running' || store.installTasks[store.selectedPlugin]?.status === 'queued'" class="bg-green-600 hover:bg-green-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">▶️ Server Starten</button>
+                        <button @click="api.stopServer()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading || store.serverStats?.status === 'offline'" class="bg-red-600 hover:bg-red-500 disabled:bg-gray-950 disabled:text-gray-700 text-white font-medium p-3 rounded-xl transition shadow cursor-pointer text-sm">⏹️ Server Stoppen</button>
                     </div>
                     
-                    <div v-if="store.isActionLoading" class="bg-gray-950 border border-gray-900 p-4 rounded-xl flex items-center space-x-3 text-sm text-gray-400">
+                    <div v-if="['running', 'queued'].includes(store.installTasks[store.selectedPlugin]?.status)" class="bg-gray-950 border border-gray-900 p-4 rounded-xl shadow-lg mt-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-sm font-bold text-blue-400 uppercase">
+                                {{ store.installTasks[store.selectedPlugin].status === 'queued' ? 'In Warteschlange' : (store.installTasks[store.selectedPlugin].phase || 'Installation läuft') }}
+                            </span>
+                            <span class="text-xs text-gray-400 font-mono">{{ Math.round(store.installTasks[store.selectedPlugin].progress || 0) }}%</span>
+                        </div>
+                        <div class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
+                            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="`width: ${store.installTasks[store.selectedPlugin].progress || 0}%`"></div>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <p class="text-xs text-gray-400 truncate pr-4">{{ store.installTasks[store.selectedPlugin].message }}</p>
+                            <button @click="api.cancelInstall()" class="bg-red-900/50 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer">Abbrechen</button>
+                        </div>
+                    </div>
+                    
+                    <div v-if="store.serverActions[store.selectedPlugin]?.isLoading && !['running', 'queued'].includes(store.installTasks[store.selectedPlugin]?.status)" class="bg-gray-950 border border-gray-900 p-4 rounded-xl flex items-center space-x-3 text-sm text-gray-400 mt-4">
                         <div class="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent"></div>
-                        <p>{{ store.loadingMessage }}</p>
+                        <p>{{ store.serverActions[store.selectedPlugin].message }}</p>
                     </div>
                     
                     <div v-if="store.activeDiagnostics?.length > 0" class="bg-red-950/80 border border-red-800 rounded-xl p-5 shadow-lg space-y-3">
@@ -316,12 +412,12 @@ export default {
                                 </div>
                             </div>
                             <div class="flex justify-end pt-2">
-                                <button @click="api.saveNetworkPorts()" :disabled="store.isActionLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-6 py-2 rounded-lg shadow-md cursor-pointer transition">💾 Ports speichern</button>
+                                <button @click="api.saveNetworkPorts()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-6 py-2 rounded-lg shadow-md cursor-pointer transition">💾 Ports speichern</button>
                             </div>
                             <div class="bg-gray-900/40 p-4 rounded-xl border border-gray-800 mt-4">
                                 <div class="flex justify-between items-center mb-3 border-b border-gray-800 pb-3">
                                     <h4 class="text-white font-bold text-sm">🛡️ Automatische Router- & Firewall-Freigabe</h4>
-                                    <button @click="api.triggerNetworkSetup()" :disabled="store.isActionLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded shadow cursor-pointer transition">Freigabe ausführen</button>
+                                    <button @click="api.triggerNetworkSetup()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded shadow cursor-pointer transition">Freigabe ausführen</button>
                                 </div>
                                 <p class="text-xs text-gray-400 mb-2">EmberCore trägt die Ports in der <b>Windows Defender Firewall</b> ein und funkt parallel deinen <b>Router über UPnP an</b>.</p>
                                 <p class="text-[10px] text-orange-400 font-bold mt-2 bg-orange-950/30 p-2 rounded">WICHTIG: Erfordert danach den Klick auf "Ja" im Windows Administrator-Fenster (Schild-Symbol). UPnP muss im Router aktiviert sein!</p>
@@ -334,8 +430,11 @@ export default {
                     <div class="bg-gray-950 rounded-xl p-5 border border-gray-900 shadow-md space-y-4">
                         <div><h3 class="text-sm font-bold text-white uppercase tracking-wider">🔌 {{ store.pluginManifest?.mods_meta?.provider === 'curseforge' ? 'CurseForge' : 'Steam Workshop' }} Modifikationen</h3></div>
                         <div class="flex items-center space-x-2">
-                            <input type="text" :placeholder="store.pluginManifest?.mods_meta?.provider === 'curseforge' ? 'z.B. CurseForge Mod-ID' : 'z.B. 880454836'" v-model="store.newModId" class="bg-gray-900 border border-gray-800 text-sm text-white p-2 rounded-lg outline-none focus:border-orange-500 font-mono w-48">
-                            <button @click="api.addMod()" class="bg-orange-600 hover:bg-orange-500 text-xs font-semibold px-4 py-2.5 rounded-lg text-white transition cursor-pointer">➕ Mod hinzufügen</button>
+                            <input type="text" :placeholder="store.pluginManifest?.mods_meta?.provider === 'curseforge' ? 'z.B. CF Mod-ID' : 'z.B. 880454836'" v-model="store.newModId" class="bg-gray-900 border border-gray-800 text-sm text-white p-2 rounded-lg outline-none focus:border-orange-500 font-mono w-48">
+                            <button @click="resolveMods()" class="bg-gray-800 hover:bg-gray-700 text-xs font-semibold px-3 py-2.5 rounded-lg text-gray-300 transition cursor-pointer">🔍 Namen auflösen</button>
+                            <button @click="repairMods()" class="bg-gray-800 hover:bg-gray-700 text-xs font-semibold px-3 py-2.5 rounded-lg text-gray-300 transition cursor-pointer">🔧 Cache reparieren</button>
+                            <button @click="openModTransfer()" class="bg-gray-800 hover:bg-gray-700 text-xs font-semibold px-3 py-2.5 rounded-lg text-gray-300 transition cursor-pointer">📤 Übertragen an...</button>
+                            <button @click="api.addMod()" class="bg-orange-600 hover:bg-orange-500 text-xs font-semibold px-3 py-2.5 rounded-lg text-white transition cursor-pointer">➕ Hinzufügen</button>
                         </div>
                     </div>
                     <div class="bg-gray-950 rounded-xl border border-gray-900 overflow-hidden shadow-md">
@@ -416,8 +515,8 @@ export default {
                         <div class="p-4 bg-gray-950 border-b border-gray-900 flex justify-between items-center">
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider">📦 Vorhandene Speicherstände</h3>
                             <div class="flex gap-2">
-                                <button @click="api.importSavegame()" :disabled="store.isActionLoading" class="bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">📤 Import (.zip)</button>
-                                <button @click="api.createBackup()" :disabled="store.isActionLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
+                                <button @click="api.importSavegame()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">📤 Import (.zip)</button>
+                                <button @click="api.createBackup()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
                             </div>
                         </div>
                         <div v-if="store.serverStats?.backup_progress?.active" class="bg-gray-900 border border-gray-800 p-4 rounded-xl mb-4 shadow-inner">
@@ -457,6 +556,44 @@ export default {
 
             </div>
         </div>
+
+        <Transition name="modal">
+        <div v-if="showTransferModal" class="fixed inset-0 bg-black/80 z-[99999] flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-800 bg-gray-950 flex justify-between items-center">
+                    <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">📤 Mods übertragen</h2>
+                </div>
+                <div class="p-6 space-y-4">
+                    <p class="text-sm text-gray-300">Wähle die Server aus, auf die die Mods übertragen werden sollen:</p>
+                    <div class="space-y-2 max-h-48 overflow-y-auto bg-gray-950 border border-gray-800 p-2 rounded-lg">
+                        <label v-for="plug in store.installedPlugins" :key="plug.id" v-show="plug.id !== store.activeServerId" class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer p-1 hover:bg-gray-900 rounded">
+                            <input type="checkbox" :value="plug.id" v-model="transferTargets" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                            {{ plug.name }} ({{ plug.id }})
+                        </label>
+                    </div>
+                    
+                    <div class="flex items-center gap-4 mt-4">
+                        <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                            <input type="radio" value="merge" v-model="transferMode" class="bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                            Bestehende behalten (Merge)
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                            <input type="radio" value="replace" v-model="transferMode" class="bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                            Überschreiben (Replace)
+                        </label>
+                    </div>
+                    <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="checkbox" v-model="transferCopyFiles" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
+                        Dateien (.pak / Workshop) physisch mitkopieren
+                    </label>
+                </div>
+                <div class="p-4 border-t border-gray-800 bg-gray-950 flex justify-end gap-3">
+                    <button @click="showTransferModal = false" class="px-5 py-2.5 rounded-lg text-xs font-bold text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">Abbrechen</button>
+                    <button @click="submitModTransfer()" class="px-5 py-2.5 rounded-lg text-xs font-bold bg-orange-600 hover:bg-orange-500 text-white shadow-md transition cursor-pointer">Übertragen</button>
+                </div>
+            </div>
+        </div>
+        </Transition>
     </div>
     `
 };

@@ -6,6 +6,7 @@ export const store = reactive({
     selectedPlugin: null,
 
     isActionLoading: false,
+    serverActions: {},
     isSubscribing: null,
     loadingMessage: "",
 
@@ -48,6 +49,9 @@ export const store = reactive({
     devMode: false,
     
     ampImportTask: null,
+    ampImportTask: null,
+    installTasks: {},
+    installInterval: null,
     ampImportPath: "",
     ampImportMode: "move",
     pluginManifest: null
@@ -188,7 +192,19 @@ export const api = {
             }
         } catch (err) {}
     },
-    async checkGameUpdate() { store.isActionLoading = true; store.loadingMessage = "Frage Steam-Server nach neuer Version..."; try { const res = await fetch(`/api/server/check-updates/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Update Check"); this.fetchStats(); } catch (e) { await this.alert("Konnte Steam-Server nicht erreichen.", "Netzwerk Fehler"); } store.isActionLoading = false; },
+    async checkGameUpdate() { 
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Frage Steam-Server nach neuer Version..."); 
+        try { 
+            const res = await fetch(`/api/server/check-updates/${pId}`, { method: 'POST' }); 
+            const data = await res.json(); 
+            await this.alert(data.message, "Update Check"); 
+            this.fetchStats(); 
+        } catch (e) { 
+            await this.alert("Konnte Steam-Server nicht erreichen.", "Netzwerk Fehler"); 
+        } 
+        this.setServerLoading(pId, null); 
+    },
     async selectServer(id) { 
         store.selectedPlugin = id; 
         store.currentView = "server"; 
@@ -243,11 +259,38 @@ export const api = {
     async openListsTab() { store.serverTab = 'lists'; const res = await fetch(`/api/server/lists/${store.selectedPlugin}`); if (res.ok) store.listData = await res.json(); },
     async saveList(lst) { const payload = {}; payload[lst.id] = lst.content; await fetch(`/api/server/lists/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await this.alert("Die Liste wurde erfolgreich auf dem Server gespeichert.", "Liste gespeichert"); },
     async openNetworkTab() { store.serverTab = 'network'; const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/network/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.networkData = data; } },
-    async saveNetworkPorts() {
-        store.isActionLoading = true;
-        store.loadingMessage = "Speichere Ports...";
+    async importSavegame() {
+        const pId = store.selectedPlugin;
+        const file = await new Promise(resolve => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.zip';
+            input.onchange = e => resolve(e.target.files[0]);
+            input.click();
+        });
+        if (!file) return;
+
+        this.setServerLoading(pId, "Lade Savegame hoch...");
+        const formData = new FormData();
+        formData.append('file', file);
         try {
-            const res = await fetch(`/api/server/network/${store.selectedPlugin}`, {
+            const res = await fetch(`/api/server/savegame/import/${pId}`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            if (res.ok) await this.alert(data.message, "Import erfolgreich");
+            else await this.alert(data.detail, "Import fehlgeschlagen");
+        } catch (e) {
+            await this.alert("Upload fehlgeschlagen.", "Fehler");
+        }
+        this.setServerLoading(pId, null);
+    },
+    async saveNetworkPorts() {
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Speichere Ports...");
+        try {
+            const res = await fetch(`/api/server/network/${pId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ports: store.networkData.ports })
@@ -259,7 +302,14 @@ export const api = {
         }
         store.isActionLoading = false;
     },
-    async triggerNetworkSetup() { store.isActionLoading = true; store.loadingMessage = "Erstelle und sende Firewall/Router Anweisung..."; const res = await fetch(`/api/server/network/setup/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Netzwerk Setup"); store.isActionLoading = false; },
+    async triggerNetworkSetup() { 
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Erstelle und sende Firewall/Router Anweisung..."); 
+        const res = await fetch(`/api/server/network/setup/${pId}`, { method: 'POST' }); 
+        const data = await res.json(); 
+        await this.alert(data.message, "Netzwerk Setup"); 
+        this.setServerLoading(pId, null); 
+    },
     openModsTab() { store.serverTab = 'mods'; this.fetchMods(); },
     async fetchMods() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/mods/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.activeMods = data; } },
     async addMod() {
@@ -348,22 +398,104 @@ export const api = {
         this.loadInstalledPlugins(); 
         await this.alert("Die Konfiguration wurde erfolgreich gespeichert.", "Erfolg"); 
     },
-    async installServer() { store.isActionLoading = true; store.loadingMessage = "SteamCMD synchronisiert Spieldateien..."; await fetch(`/api/server/install/${store.selectedPlugin}`, { method: 'POST' }); store.isActionLoading = false; this.fetchStats(); },
-    async startServer() { store.isActionLoading = true; store.loadingMessage = "Initialisiere Prozessumgebung..."; const res = await fetch(`/api/server/start/${store.selectedPlugin}`, { method: 'POST' }); const data = await res.json(); if(data.status === 'error') await this.alert(data.message, "Start blockiert"); store.isActionLoading = false; setTimeout(() => this.fetchStats(), 1000); },
-    async stopServer() { store.isActionLoading = true; store.loadingMessage = "Sende Shutdown Signal an Prozesse..."; await fetch(`/api/server/stop/${store.selectedPlugin}`, { method: 'POST' }); store.isActionLoading = false; setTimeout(() => this.fetchStats(), 500); },
+    async installServer() { 
+        const pId = store.selectedPlugin;
+        const res = await fetch(`/api/server/install/${pId}`, { method: 'POST' }); 
+        const data = await res.json();
+        if (data.status === 'error') {
+            await this.alert(data.message, "Fehler");
+            return;
+        }
+        this.pollInstallStatus();
+    },
+    async pollInstallStatus() {
+        if (!store.installInterval) {
+            store.installInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/server/install/status_all`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    
+                    for (const [pId, task] of Object.entries(data)) {
+                        const oldStatus = store.installTasks[pId]?.status;
+                        store.installTasks[pId] = task;
+                        
+                        if (oldStatus && oldStatus !== 'completed' && task.status === 'completed' && task.auto_start) {
+                            this._internalStartServer(pId);
+                        }
+                        
+                        if (oldStatus && ["running", "queued"].includes(oldStatus) && !["running", "queued"].includes(task.status)) {
+                            if (pId === store.selectedPlugin) this.fetchStats();
+                        }
+                    }
+                    
+                    // Bereinige gelöschte Tasks
+                    for (const pId of Object.keys(store.installTasks)) {
+                        if (!data[pId]) delete store.installTasks[pId];
+                    }
+                    
+                } catch(e) {}
+            }, 1500);
+        }
+    },
+    async cancelInstall() {
+        if (!store.selectedPlugin) return;
+        await fetch(`/api/server/install/cancel/${store.selectedPlugin}`, { method: 'POST' });
+    },
+    setServerLoading(pId, msg) {
+        if (msg) store.serverActions[pId] = { isLoading: true, message: msg };
+        else delete store.serverActions[pId];
+    },
+    async startServer() { 
+        this._internalStartServer(store.selectedPlugin);
+    },
+    async _internalStartServer(pId) {
+        this.setServerLoading(pId, "Initialisiere Prozessumgebung..."); 
+        const res = await fetch(`/api/server/start/${pId}`, { method: 'POST' }); 
+        const data = await res.json(); 
+        if(data.status === 'error') {
+            await this.alert(data.message, "Start blockiert"); 
+        } else if (data.status === 'info') {
+            this.pollInstallStatus();
+        }
+        this.setServerLoading(pId, null);
+        if (pId === store.selectedPlugin) setTimeout(() => this.fetchStats(), 1000); 
+    },
+    async stopServer() { 
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Sende Shutdown Signal an Prozesse..."); 
+        await fetch(`/api/server/stop/${pId}`, { method: 'POST' }); 
+        this.setServerLoading(pId, null);
+        setTimeout(() => this.fetchStats(), 500); 
+    },
     async deleteServer() {
         const server = store.installedPlugins.find(p => p.id === store.selectedPlugin);
         const serverName = server ? server.server_name : 'Server';
         if (!(await this.confirm(`Möchtest du den Server '${serverName}' mitsamt aller Spieldateien und Backups komplett löschen? Das kann nicht rückgängig gemacht werden!`, "Server vernichten"))) return;
-        try { const res = await fetch(`/api/server/delete/${store.selectedPlugin}`, { method: 'DELETE' }); const data = await res.json(); if(res.ok) { this.openMarketplace(); this.loadInstalledPlugins(); } else { await this.alert(data.detail, "Fehler"); } } catch(e){}
+        try { const res = await fetch(`/api/server/delete/${store.selectedPlugin}`, { method: 'DELETE' }); const data = await res.json(); if(res.ok) { this.openMarketplace(); this.loadInstalledPlugins(); } else { await this.alert(data.detail || data.message, "Fehler"); } } catch(e){}
     },
     openLocalFolder() { fetch(`/api/server/open-folder/${store.selectedPlugin}`, { method: 'POST' }); },
     openMarketplace() { store.currentView = "marketplace"; store.selectedPlugin = null; fetch('/api/plugins/available').then(r => r.json()).then(d => store.availablePlugins = d).catch(() => {}); },
     addSchedule() { if(!store.newSchedVal) return; store.backupSchedule.schedules.push({ type: store.newSchedType, value: store.newSchedVal }); this.saveBackupSettings(); store.newSchedVal = ""; },
     removeSchedule(idx) { store.backupSchedule.schedules.splice(idx, 1); this.saveBackupSettings(); },
     async saveBackupSettings() { await fetch(`/api/server/backup/schedule/${store.selectedPlugin}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(store.backupSchedule) }); },
-    async applyFix(fixType) { store.isActionLoading = true; const res = await fetch(`/api/server/diagnostics/fix/${store.selectedPlugin}/${fixType}`, { method: 'POST' }); const data = await res.json(); await this.alert(data.message, "Absturz-Schutz"); store.isActionLoading = false; this.fetchStats(); },
-    async createBackup() { await fetch(`/api/server/backup/create/${store.selectedPlugin}`, { method: 'POST' }); this.fetchBackups(); },
+    async applyFix(fixType) { 
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Wende Fix an..."); 
+        const res = await fetch(`/api/server/diagnostics/fix/${pId}/${fixType}`, { method: 'POST' }); 
+        const data = await res.json(); 
+        await this.alert(data.message, "Absturz-Schutz"); 
+        if (fixType === "update_server") this.pollInstallStatus();
+        this.setServerLoading(pId, null);
+        this.fetchStats(); 
+    },
+    async createBackup() { 
+        const pId = store.selectedPlugin;
+        this.setServerLoading(pId, "Erstelle Backup...");
+        await fetch(`/api/server/backup/create/${pId}`, { method: 'POST' }); 
+        this.fetchBackups(); 
+        this.setServerLoading(pId, null);
+    },
     async restoreBackup(filename) { if (!(await this.confirm(`Möchtest du das Backup '${filename}' wirklich einspielen?\n\nAlle aktuellen Fortschritte werden überschrieben!`, "Backup einspielen"))) return; await fetch(`/api/server/backup/restore/${store.selectedPlugin}/${filename}`, { method: 'POST' }); await this.alert("Das Rollback war erfolgreich.", "Erfolg"); },
     async deleteBackup(filename) { if (!(await this.confirm(`Soll das Backup unwiderruflich gelöscht werden?`, "Archiv löschen"))) return; await fetch(`/api/server/backup/delete/${store.selectedPlugin}/${filename}`, { method: 'DELETE' }); this.fetchBackups(); },
     
@@ -377,12 +509,13 @@ export const api = {
             
             if (!(await this.confirm(`Möchtest du den Spielstand aus '${file.name}' wirklich importieren?\n\nDie Ordnerstruktur wird automatisch korrigiert. Achtung: Dein bisheriger lokaler Fortschritt wird gnadenlos gelöscht/überschrieben!`, "Savegame Importieren"))) return;
             
+            const pId = store.selectedPlugin;
             const formData = new FormData();
             formData.append("file", file);
             
-            store.isActionLoading = true;
+            this.setServerLoading(pId, "Lade Savegame hoch...");
             try {
-                const res = await fetch(`/api/server/backup/import/${store.selectedPlugin}`, {
+                const res = await fetch(`/api/server/backup/import/${pId}`, {
                     method: 'POST',
                     body: formData
                 });
@@ -395,7 +528,7 @@ export const api = {
             } catch (err) {
                 await this.alert("Netzwerkfehler beim Upload.", "Fehler");
             } finally {
-                store.isActionLoading = false;
+                this.setServerLoading(pId, null);
             }
         };
         input.click();

@@ -4,63 +4,84 @@ from core.env import DEV_PLUGINS_ROOT, PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT, BA
 class ConfigManager:
     @staticmethod
     def rename_plugin(old_id: str, new_id: str) -> dict:
-        import shutil, subprocess
+        import shutil
         warnings = []
         
-        old_server = os.path.join(SERVERS_ROOT, old_id)
-        new_server = os.path.join(SERVERS_ROOT, new_id)
-        if os.path.exists(old_server):
-            try: shutil.move(old_server, new_server)
-            except Exception as e: return {"status": "error", "message": f"Konnte Server-Verzeichnis nicht verschieben: {e}"}
-            
-        old_data = os.path.join(DATA_ROOT, old_id)
-        new_data = os.path.join(DATA_ROOT, new_id)
-        if os.path.exists(old_data):
-            try: shutil.move(old_data, new_data)
-            except Exception as e: warnings.append(f"Konnte Data-Verzeichnis nicht verschieben: {e}")
-            
-        old_backup = os.path.join(BACKUPS_ROOT, old_id)
-        new_backup = os.path.join(BACKUPS_ROOT, new_id)
-        if os.path.exists(old_backup):
-            try: shutil.move(old_backup, new_backup)
-            except Exception as e: warnings.append(f"Konnte Backup-Verzeichnis nicht verschieben: {e}")
-            
-        old_plugin = os.path.join(PLUGINS_ROOT, old_id)
-        new_plugin = os.path.join(PLUGINS_ROOT, new_id)
-        if os.path.exists(old_plugin):
-            try: shutil.move(old_plugin, new_plugin)
-            except Exception as e: return {"status": "error", "message": f"Konnte Plugin-Verzeichnis nicht verschieben: {e}"}
-            
-            # Manifest ID patchen
-            manifest_path = os.path.join(new_plugin, "manifest.yaml")
-            if os.path.exists(manifest_path):
-                try:
-                    with open(manifest_path, "r", encoding="utf-8") as f: manifest_data = yaml.safe_load(f)
-                    manifest_data["id"] = new_id
-                    with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest_data, f, allow_unicode=True, sort_keys=False)
-                except Exception as e: warnings.append(f"Konnte manifest.yaml ID nicht aktualisieren: {e}")
+        try:
+            old_server = os.path.join(SERVERS_ROOT, old_id)
+            new_server = os.path.join(SERVERS_ROOT, new_id)
+            if os.path.exists(old_server):
+                if os.path.exists(new_server):
+                    return {"status": "error", "message": f"Zielverzeichnis '{new_id}' existiert bereits unter servers/."}
+                try: shutil.move(old_server, new_server)
+                except Exception as e: return {"status": "error", "message": f"Konnte Server-Verzeichnis nicht verschieben: {e}"}
                 
-        # Cluster DB patchen
-        cluster_db_path = os.path.join(DATA_ROOT, "clusters_db.json")
-        if os.path.exists(cluster_db_path):
+            old_data = os.path.join(DATA_ROOT, old_id)
+            new_data = os.path.join(DATA_ROOT, new_id)
+            if os.path.exists(old_data):
+                if not os.path.exists(new_data):
+                    try: shutil.move(old_data, new_data)
+                    except Exception as e: warnings.append(f"Konnte Data-Verzeichnis nicht verschieben: {e}")
+                
+            old_backup = os.path.join(BACKUPS_ROOT, old_id)
+            new_backup = os.path.join(BACKUPS_ROOT, new_id)
+            if os.path.exists(old_backup):
+                if not os.path.exists(new_backup):
+                    try: shutil.move(old_backup, new_backup)
+                    except Exception as e: warnings.append(f"Konnte Backup-Verzeichnis nicht verschieben: {e}")
+                
+            old_plugin = os.path.join(PLUGINS_ROOT, old_id)
+            new_plugin = os.path.join(PLUGINS_ROOT, new_id)
+            if os.path.exists(old_plugin):
+                if not os.path.exists(new_plugin):
+                    try: shutil.move(old_plugin, new_plugin)
+                    except Exception as e: return {"status": "error", "message": f"Konnte Plugin-Verzeichnis nicht verschieben: {e}"}
+                
+                # Manifest ID patchen
+                manifest_path = os.path.join(new_plugin, "manifest.yaml")
+                if os.path.exists(manifest_path):
+                    try:
+                        with open(manifest_path, "r", encoding="utf-8") as f: manifest_data = yaml.safe_load(f)
+                        manifest_data["id"] = new_id
+                        with open(manifest_path, "w", encoding="utf-8") as f: yaml.dump(manifest_data, f, allow_unicode=True, sort_keys=False)
+                    except Exception as e: warnings.append(f"Konnte manifest.yaml ID nicht aktualisieren: {e}")
+                    
+            # Cluster DB patchen
+            cluster_db_path = os.path.join(DATA_ROOT, "clusters_db.json")
+            if os.path.exists(cluster_db_path):
+                try:
+                    with open(cluster_db_path, "r", encoding="utf-8") as f: cluster_db = json.load(f)
+                    changed = False
+                    for c_id, c_data in cluster_db.items():
+                        if "members" in c_data:
+                            new_members = []
+                            for m in c_data["members"]:
+                                if m == old_id:
+                                    new_members.append(new_id)
+                                    changed = True
+                                else:
+                                    new_members.append(m)
+                            c_data["members"] = new_members
+                    if changed:
+                        with open(cluster_db_path, "w", encoding="utf-8") as f: json.dump(cluster_db, f, indent=2)
+                except Exception as e:
+                    warnings.append(f"Konnte clusters_db.json nicht patchen: {e}")
+                    
+            # Firewall patchen
+            from core.firewall_manager import firewall_manager
             try:
-                with open(cluster_db_path, "r", encoding="utf-8") as f: cluster_db = json.load(f)
-                changed = False
-                for c_id, c_data in cluster_db.items():
-                    if "members" in c_data:
-                        new_members = []
-                        for m in c_data["members"]:
-                            if m == old_id:
-                                new_members.append(new_id)
-                                changed = True
-                            else:
-                                new_members.append(m)
-                        c_data["members"] = new_members
-                if changed:
-                    with open(cluster_db_path, "w", encoding="utf-8") as f: json.dump(cluster_db, f, indent=2)
-            except Exception as e: warnings.append(f"Konnte clusters_db.json nicht patchen: {e}")
-            
-        return {"status": "success", "warnings": warnings}
+                firewall_manager.remove_rules_for_plugin(old_id)
+                from core.config_manager import ConfigManager
+                new_manifest = ConfigManager.load_manifest(new_id)
+                if new_manifest:
+                    firewall_manager.apply_rules_for_plugin(new_id, new_manifest)
+            except Exception as e:
+                warnings.append(f"Fehler bei der Firewall-Aktualisierung: {e}")
+                
+            return {"status": "success", "message": "Server erfolgreich umbenannt.", "warnings": warnings}
+        except Exception as e:
+            logger.exception(f"[!] Kritischer Fehler bei Rename {old_id} -> {new_id}: {e}")
+            return {"status": "error", "message": f"Kritischer Systemfehler beim Umbenennen: {str(e)}"}
     @staticmethod
     def get_plugin_paths(plugin_id: str):
         dev_path = os.path.join(DEV_PLUGINS_ROOT, plugin_id, "manifest.yaml")

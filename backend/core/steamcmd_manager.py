@@ -70,8 +70,9 @@ class SteamCMDManager:
             "+quit"
         ]
 
+        flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
         try:
-            process = subprocess.run(cmd)
+            process = subprocess.run(cmd, creationflags=flags)
             # SteamCMD gibt auf Linux bei Erfolg manchmal Code 0 oder 7 zurück
             if process.returncode in [0, 7]:
                 print(f"[+] App {app_id} erfolgreich heruntergeladen/aktualisiert!")
@@ -129,3 +130,63 @@ class SteamCMDManager:
             print(f"\n[+] Alle Mods erfolgreich verarbeitet!\n{'#'*60}\n")
         except Exception as e:
             logger.error(f"[SteamCMD] Mod-Download fehlgeschlagen: {e}")
+
+    def stream_app_update(self, app_id: int, install_dir_name: str, force_windows: bool = False):
+        """Identisch zu install_or_update_app, gibt aber Popen für asynchrones Lesen zurück."""
+        self.install_steamcmd_if_missing()
+
+        install_dir_abs = os.path.join(self.base_dir, install_dir_name)
+        os.makedirs(install_dir_abs, exist_ok=True)
+
+        cmd = [self.exe_path]
+        if platform.system() != "Windows" and force_windows:
+            cmd += ["+@sSteamCmdForcePlatformType", "windows"]
+
+        cmd += [
+            "+force_install_dir", install_dir_abs,
+            "+login", "anonymous",
+            "+app_update", str(app_id),
+            "+quit"
+        ]
+
+        flags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, creationflags=flags
+            )
+            return process
+        except Exception as e:
+            from core.env import logger
+            logger.error(f"[SteamCMD] Start fehlgeschlagen: {e}")
+            return None
+
+    def stream_workshop_mods(self, plugin_id: str, workshop_appid: str, mods_info: list):
+        """Identisch zu update_workshop_mods, gibt aber Popen für asynchrones Lesen zurück."""
+        if not mods_info:
+            return None
+            
+        install_dir = os.path.abspath(os.path.join(self.base_dir, plugin_id))
+        is_windows = platform.system() == "Windows"
+        exe_path = os.path.join(self.base_dir, "steamcmd", "steamcmd.exe" if is_windows else "steamcmd.sh")
+        
+        if not os.path.exists(exe_path):
+            return None
+            
+        cmd = [exe_path, "+force_install_dir", install_dir, "+login", "anonymous"]
+        for m in mods_info:
+            cmd.extend(["+workshop_download_item", str(workshop_appid), str(m.get('id', ''))])
+            cmd.append("validate")
+        cmd.append("+quit")
+        
+        flags = subprocess.CREATE_NO_WINDOW if is_windows else 0
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                text=True, bufsize=1, creationflags=flags
+            )
+            return process
+        except Exception as e:
+            from core.env import logger
+            logger.error(f"[SteamCMD] Mod-Download Start fehlgeschlagen: {e}")
+            return None
