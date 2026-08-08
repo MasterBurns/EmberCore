@@ -878,15 +878,18 @@ def start(plugin_id: str):
                     if template.startswith("?"):
                         if args and ("?" in args[0] or args[0].endswith("_WP") or args[0].lower() in ["theisland", "scorchedearth", "aberration"]):
                             import re
-                            param_name = template.split("=")[0].strip("?")  # z.B. SessionName
-                            new_param = template.replace("{value}", val).strip("?")
+                            param_key = template.split("=")[0].replace("?", "")
+                            pattern = rf"\?{re.escape(param_key)}=[^?]*"
                             
-                            if f"?{param_name}=" in args[0]:
-                                # Ersetze den alten Wert
-                                args[0] = re.sub(rf"\?{param_name}=[^?]*", f"?{new_param}", args[0])
+                            # Clean template (entferne Quotes für ASA-Sicherheit)
+                            clean_template = template.replace('"', '')
+                            
+                            if re.search(pattern, args[0]):
+                                # Überschreiben statt doppeltes Anhängen
+                                args[0] = re.sub(pattern, clean_template.replace("{value}", val), args[0])
                             else:
-                                # Hänge ihn neu an
-                                args[0] += f"?{new_param}"
+                                # Anhängen, wenn nicht vorhanden
+                                args[0] += clean_template.replace("{value}", val)
                     else:
                         # Für normale Argumente (wie -ServerName=... für Conan)
                         import re

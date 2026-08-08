@@ -41,6 +41,12 @@ class ConfigManager:
             if res.status_code == 200 and b"PK\x03\x04" not in res.content[:4]:
                 new_manifest = yaml.safe_load(res.content)
 
+                # Nur nicht-lokale Sections überschreiben
+                preserved_sections = ["config_meta", "default_args", "shutdown"]
+                for section in preserved_sections:
+                    if section in local_manifest:
+                        new_manifest[section] = local_manifest[section]
+
                 # Wichtig: Die lokale ID und die Quell-URL in das frische Manifest übernehmen!
                 new_manifest["id"] = local_manifest.get("id", plugin_id)
                 new_manifest["source_url"] = source_url
