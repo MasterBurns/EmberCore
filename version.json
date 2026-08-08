@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.5",
+  "build_date": "2026-08-08",
+  "changelog": [
+    "BUGFIX: ASA Server Sichtbarkeit komplett repariert. ASA benötigt zwingend eine englische Lokalisierung in der Config ([Internationalization] Culture=en), andernfalls schlägt die Epic Online Services (EOS) Registrierung lautlos fehl (Erkennbar am leeren 'Server Region' Log). Dieses Feld wird nun standardmäßig erzwungen und repariert."
+  ]
+  },
+  {
   "version": "v0.2.0.4",
   "build_date": "2026-07-14",
   "changelog": [

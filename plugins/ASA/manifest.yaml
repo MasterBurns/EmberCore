@@ -87,6 +87,13 @@ config_meta:
     SessionName: "?SessionName=\"{value}\""
     MaxPlayers: "?MaxPlayers={value}"
   fields:
+    # --- LOKALISIERUNG / REGION BUGFIX ---
+    - key: "Culture"
+      label: "Systemsprache (Zwingend 'en' für EOS Registrierung)"
+      type: "text"
+      section: "Internationalization"
+      default: "en"
+
     # --- GRUNDEINSTELLUNGEN ---
     - key: "SessionName"
       label: "Server Name"
@@ -176,6 +183,10 @@ config_meta:
 
 # Crash-Erkennung & Diagnostik
 diagnostics:
+  - id: "asa_empty_region"
+    pattern: "Server Region is \"\""
+    message: "Fehler bei der Master-Server Registrierung. Der Server ist unsichtbar. Lösung: Im Tab Konfiguration die Systemsprache (Culture) auf 'en' setzen und speichern."
+
   - pattern: "Failed to listen on Query Port"
     message: "Port 27015 ist blockiert. Läuft bereits ein anderer Server auf diesem Port?"
     action_type: "manual"
