@@ -230,33 +230,60 @@ class ServerManager:
             try:
                 live_cfg = ConfigManager.parse_live_config(os.path.join(SERVERS_ROOT, plugin_id, rcon_meta.get("config_path", "")))
                 port_key = rcon_meta.get("port_key", "RconPort")
-                rcon_port = live_cfg.get(port_key)
-
-                if not rcon_port:
-                    rcon_port = int(rcon_meta.get("port", 25575))
-                    desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
-                    cd = {}
-                    if os.path.exists(desired_path):
-                        with open(desired_path, "r") as df: cd = json.load(df)
-                    if port_key not in cd:
-                        cd[port_key] = rcon_port
-                        with open(desired_path, "w") as df: json.dump(cd, df, indent=2)
-                        ConfigManager.apply_desired_config(plugin_id)
-                else: rcon_port = int(rcon_port)
-
+                
+                # Port Fallback Candidates
+                port_candidates = []
+                p1 = live_cfg.get(port_key)
+                if p1: port_candidates.append(int(p1))
+                p2 = rcon_meta.get("port")
+                if p2: port_candidates.append(int(p2))
+                port_candidates.extend([27020, 27015])
+                
+                ports_to_try = []
+                for p in port_candidates:
+                    if p not in ports_to_try: ports_to_try.append(p)
+                
                 password = rcon_meta.get("default_password", "")
                 if "password_key" in rcon_meta: password = live_cfg.get(rcon_meta["password_key"], password)
                 cmd = rcon_meta.get("command", "CloseServer")
 
-                with socket.create_connection(("127.0.0.1", rcon_port), timeout=3) as s:
-                    auth = struct.pack('<iii', 10, 3, 0) + password.encode('utf-8') + b'\x00\x00'
-                    s.sendall(struct.pack('<i', len(auth)) + auth)
-                    s.recv(4096)
-                    cmd_pkt = struct.pack('<iii', 11, 2, 0) + cmd.encode('utf-8') + b'\x00\x00'
-                    s.sendall(struct.pack('<i', len(cmd_pkt)) + cmd_pkt)
-                    logger.info(f"[+] RCON '{cmd}' erfolgreich gesendet.")
-                    graceful = True
-            except Exception as e: logger.warning(f"[!] RCON fehlgeschlagen: {e}")
+                def build_rcon_packet(pkt_id, pkt_type, body):
+                    payload = struct.pack('<ii', pkt_id, pkt_type) + body.encode('utf-8') + b'\x00\x00'
+                    return struct.pack('<i', len(payload)) + payload
+
+                for port in ports_to_try:
+                    try:
+                        with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+                            # Sende Auth
+                            s.sendall(build_rcon_packet(1, 3, password))
+                            
+                            resp = s.recv(4096)
+                            if len(resp) < 12: raise Exception("Incomplete auth response")
+                            resp_len, resp_id, resp_type = struct.unpack('<iii', resp[:12])
+                            
+                            # Server schickt manchmal ein leeres Response-Paket voraus
+                            if resp_type != 2:
+                                resp = s.recv(4096)
+                                if len(resp) < 12: raise Exception("Incomplete auth response 2")
+                                resp_len, resp_id, resp_type = struct.unpack('<iii', resp[:12])
+                                
+                            if resp_type != 2 or resp_id == -1:
+                                raise Exception("RCON Auth fehlgeschlagen")
+                                
+                            logger.info(f"[*] RCON Auth auf Port {port} erfolgreich.")
+                            
+                            # Optional: Vor DoExit erst SaveWorld senden
+                            s.sendall(build_rcon_packet(2, 2, "SaveWorld"))
+                            time.sleep(2)
+                            
+                            # Sende eigentlichen Shutdown Befehl
+                            s.sendall(build_rcon_packet(3, 2, cmd))
+                            logger.info(f"[+] RCON '{cmd}' erfolgreich gesendet.")
+                            graceful = True
+                            break
+                    except Exception as e:
+                        logger.debug(f"RCON Versuch auf Port {port} fehlgeschlagen: {e}")
+            except Exception as e: logger.warning(f"[!] RCON Fehler: {e}")
 
         if not graceful:
             logger.info("[Recovery] Sende Soft-Kill...")
@@ -265,8 +292,10 @@ class ServerManager:
                 except: pass
                 if platform.system() == "Windows": subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
-        for _ in range(15):
+        grace_seconds = manifest.get("shutdown", {}).get("grace_seconds", 120) if manifest else 120
+        for i in range(grace_seconds):
             if not any(p.is_running() and p.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD] for p in procs.values()): break
+            if i > 0 and i % 15 == 0: logger.info(f"[*] Warte auf sauberes Beenden ({i}s / {grace_seconds}s)...")
             time.sleep(1)
 
         if any(p.is_running() and p.status() not in [psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD] for p in procs.values()):

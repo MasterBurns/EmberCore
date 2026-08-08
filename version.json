@@ -1,5 +1,19 @@
 [
   {
+  "version": "v0.2.0.10",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "BUGFIX: RCON Shutdown (Save & Exit) massiv überarbeitet. RCON-Pakete entsprechen nun exakt der Source RCON Spezifikation (Längen-Präfix Fehler behoben). Auth-Responses werden korrekt validiert. Der Manager probiert nun automatisch mehrere mögliche RCON-Ports aus (INI-Wert, Manifest-Wert, 27015, 27020), bis einer antwortet. Vor einem Shutdown wird zudem sicherheitshalber ein SaveWorld-Befehl abgesetzt und die maximale Wartezeit (Grace Period) für große Spiele wie ASA auf 120 Sekunden erhöht, um Datenverlust zu verhindern."
+  ]
+  },
+  {
+  "version": "v0.2.0.9",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "BUGFIX: ASA Server MaxPlayers gefixt. ARK Ascended (ASA) verwendet nicht mehr den URL-Parameter '?MaxPlayers', sondern erfordert zwingend das eigenständige Argument '-WinLiveMaxPlayers'. Die Manifest-Datei wurde entsprechend angepasst, sodass ASA-Server nun die korrekte Slot-Anzahl in der Serverliste anzeigen."
+  ]
+  },
+  {
   "version": "v0.2.0.8",
   "build_date": "2026-08-09",
   "changelog": [

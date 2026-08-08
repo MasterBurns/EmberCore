@@ -86,7 +86,7 @@ config_meta:
   format: "ini"
   arg_mapping:
     SessionName: "?SessionName={value}"
-    MaxPlayers: "?MaxPlayers={value}"
+    MaxPlayers: "-WinLiveMaxPlayers={value}"
   fields:
     # --- LOKALISIERUNG / REGION BUGFIX ---
     - key: "Culture"
