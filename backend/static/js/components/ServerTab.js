@@ -10,17 +10,17 @@ export default {
             
             const newId = await api.prompt(
                 'Gib eine neue ID für diesen Server ein.\n\n⚠️ WARNUNG:\n- Der Server muss offline sein.\n- Alle Serverdateien und Backups werden verschoben.\n- Firewall-Regeln werden neu erstellt.\n- Nur a-z, 0-9 und _ sind erlaubt.',
-                store.activeServerId,
+                store.selectedPlugin,
                 'z.B. mein_asa_server',
                 'Server umbenennen'
             );
             
-            if (!newId || newId === store.activeServerId) return;
+            if (!newId || newId === store.selectedPlugin) return;
             
-            api.setServerLoading(store.activeServerId, "Server wird umbenannt...");
+            api.setServerLoading(store.selectedPlugin, "Server wird umbenannt...");
             
             try {
-                const res = await fetch(`/api/server/rename/${store.activeServerId}`, {
+                const res = await fetch(`/api/server/rename/${store.selectedPlugin}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ new_id: newId })
@@ -32,7 +32,7 @@ export default {
                         api.alert('Server wurde umbenannt, aber es gab Warnungen:\n' + data.warnings.join('\n'), 'Erfolgreich mit Warnungen');
                     }
                     // Select new server
-                    store.activeServerId = data.new_id;
+                    store.selectedPlugin = data.new_id;
                     await api.loadInstalledPlugins();
                     await api.loadServerStats(data.new_id);
                 } else {
@@ -43,23 +43,23 @@ export default {
                 api.alert('Netzwerkfehler', 'Fehler');
             }
             
-            api.setServerLoading(store.activeServerId, null);
+            api.setServerLoading(store.selectedPlugin, null);
         },
         async resolveMods() {
-            api.setServerLoading(store.activeServerId, "Löse Mods auf...");
+            api.setServerLoading(store.selectedPlugin, "Löse Mods auf...");
             try {
-                const res = await fetch(\`/api/server/mods/resolve/\${store.activeServerId}\`, { method: 'POST' });
+                const res = await fetch(\`/api/server/mods/resolve/\${store.selectedPlugin}\`, { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
                     api.alert(\`Es wurden \${data.resolved_count} Mods aufgelöst.\`, 'Erfolgreich');
-                    await api.loadServerMods(store.activeServerId);
+                    await api.loadServerMods(store.selectedPlugin);
                 } else {
                     api.alert(data.message, 'Fehler');
                 }
             } catch (e) {
                 api.alert('Netzwerkfehler', 'Fehler');
             }
-            api.setServerLoading(store.activeServerId, null);
+            api.setServerLoading(store.selectedPlugin, null);
         },
         openModTransfer() {
             this.transferTargets = [];
@@ -73,10 +73,10 @@ export default {
                 return;
             }
             this.showTransferModal = false;
-            api.setServerLoading(store.activeServerId, "Übertrage Mods...");
+            api.setServerLoading(store.selectedPlugin, "Übertrage Mods...");
             try {
                 const payload = {
-                    source_plugin_id: store.activeServerId,
+                    source_plugin_id: store.selectedPlugin,
                     target_plugin_ids: this.transferTargets,
                     mode: this.transferMode,
                     copy_files: this.transferCopyFiles
@@ -95,7 +95,7 @@ export default {
             } catch (e) {
                 api.alert('Netzwerkfehler', 'Fehler');
             }
-            api.setServerLoading(store.activeServerId, null);
+            api.setServerLoading(store.selectedPlugin, null);
         },
         async repairMods() {
             const isConfirmed = await api.confirm(
@@ -104,9 +104,9 @@ export default {
             );
             if (!isConfirmed) return;
             
-            api.setServerLoading(store.activeServerId, "Repariere Mods...");
+            api.setServerLoading(store.selectedPlugin, "Repariere Mods...");
             try {
-                const res = await fetch(`/api/server/repair-mods/${store.activeServerId}`, { method: 'POST' });
+                const res = await fetch(`/api/server/repair-mods/${store.selectedPlugin}`, { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
                     api.alert(data.message, 'Erfolgreich');
@@ -226,15 +226,15 @@ export default {
                     <div v-if="['running', 'queued'].includes(store.installTasks[store.selectedPlugin]?.status)" class="bg-gray-950 border border-gray-900 p-4 rounded-xl shadow-lg mt-4">
                         <div class="flex justify-between items-center mb-2">
                             <span class="text-sm font-bold text-blue-400 uppercase">
-                                {{ store.installTasks[store.selectedPlugin].status === 'queued' ? 'In Warteschlange' : (store.installTasks[store.selectedPlugin].phase || 'Installation läuft') }}
+                                {{ store.installTasks[store.selectedPlugin]?.status === 'queued' ? 'In Warteschlange' : (store.installTasks[store.selectedPlugin]?.phase || 'Installation läuft') }}
                             </span>
-                            <span class="text-xs text-gray-400 font-mono">{{ Math.round(store.installTasks[store.selectedPlugin].progress || 0) }}%</span>
+                            <span class="text-xs text-gray-400 font-mono">{{ Math.round(store.installTasks[store.selectedPlugin]?.progress || 0) }}%</span>
                         </div>
                         <div class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
-                            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="`width: ${store.installTasks[store.selectedPlugin].progress || 0}%`"></div>
+                            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="`width: ${store.installTasks[store.selectedPlugin]?.progress || 0}%`"></div>
                         </div>
                         <div class="flex justify-between items-center">
-                            <p class="text-xs text-gray-400 truncate pr-4">{{ store.installTasks[store.selectedPlugin].message }}</p>
+                            <p class="text-xs text-gray-400 truncate pr-4">{{ store.installTasks[store.selectedPlugin]?.message }}</p>
                             <button @click="api.cancelInstall()" class="bg-red-900/50 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer">Abbrechen</button>
                         </div>
                     </div>
@@ -412,12 +412,12 @@ export default {
                                 </div>
                             </div>
                             <div class="flex justify-end pt-2">
-                                <button @click="api.saveNetworkPorts()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-6 py-2 rounded-lg shadow-md cursor-pointer transition">💾 Ports speichern</button>
+                                <button @click="api.saveNetworkPorts()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-sm font-bold px-6 py-2 rounded-lg shadow-md cursor-pointer transition">💾 Ports speichern</button>
                             </div>
                             <div class="bg-gray-900/40 p-4 rounded-xl border border-gray-800 mt-4">
                                 <div class="flex justify-between items-center mb-3 border-b border-gray-800 pb-3">
                                     <h4 class="text-white font-bold text-sm">🛡️ Automatische Router- & Firewall-Freigabe</h4>
-                                    <button @click="api.triggerNetworkSetup()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded shadow cursor-pointer transition">Freigabe ausführen</button>
+                                    <button @click="api.triggerNetworkSetup()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading" class="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded shadow cursor-pointer transition">Freigabe ausführen</button>
                                 </div>
                                 <p class="text-xs text-gray-400 mb-2">EmberCore trägt die Ports in der <b>Windows Defender Firewall</b> ein und funkt parallel deinen <b>Router über UPnP an</b>.</p>
                                 <p class="text-[10px] text-orange-400 font-bold mt-2 bg-orange-950/30 p-2 rounded">WICHTIG: Erfordert danach den Klick auf "Ja" im Windows Administrator-Fenster (Schild-Symbol). UPnP muss im Router aktiviert sein!</p>
@@ -515,8 +515,8 @@ export default {
                         <div class="p-4 bg-gray-950 border-b border-gray-900 flex justify-between items-center">
                             <h3 class="text-sm font-bold text-white uppercase tracking-wider">📦 Vorhandene Speicherstände</h3>
                             <div class="flex gap-2">
-                                <button @click="api.importSavegame()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">📤 Import (.zip)</button>
-                                <button @click="api.createBackup()" :disabled="store.serverActions[store.activeServerId]?.isLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
+                                <button @click="api.importSavegame()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading" class="bg-gray-800 hover:bg-gray-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">📤 Import (.zip)</button>
+                                <button @click="api.createBackup()" :disabled="store.serverActions[store.selectedPlugin]?.isLoading" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition cursor-pointer">💾 Jetzt erstellen</button>
                             </div>
                         </div>
                         <div v-if="store.serverStats?.backup_progress?.active" class="bg-gray-900 border border-gray-800 p-4 rounded-xl mb-4 shadow-inner">
@@ -566,7 +566,7 @@ export default {
                 <div class="p-6 space-y-4">
                     <p class="text-sm text-gray-300">Wähle die Server aus, auf die die Mods übertragen werden sollen:</p>
                     <div class="space-y-2 max-h-48 overflow-y-auto bg-gray-950 border border-gray-800 p-2 rounded-lg">
-                        <label v-for="plug in store.installedPlugins" :key="plug.id" v-show="plug.id !== store.activeServerId" class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer p-1 hover:bg-gray-900 rounded">
+                        <label v-for="plug in store.installedPlugins" :key="plug.id" v-show="plug.id !== store.selectedPlugin" class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer p-1 hover:bg-gray-900 rounded">
                             <input type="checkbox" :value="plug.id" v-model="transferTargets" class="rounded bg-gray-900 border-gray-700 text-orange-500 focus:ring-orange-500 w-4 h-4">
                             {{ plug.name }} ({{ plug.id }})
                         </label>

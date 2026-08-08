@@ -49,7 +49,6 @@ export const store = reactive({
     devMode: false,
     
     ampImportTask: null,
-    ampImportTask: null,
     installTasks: {},
     installInterval: null,
     ampImportPath: "",
