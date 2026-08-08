@@ -4,6 +4,9 @@ export default {
     setup() { 
         return { store, api, formatUptime }; 
     },
+    data() {
+        return { discoveredInstances: [], isDiscovering: false, discoveryTried: false };
+    },
     template: `
     <div class="max-w-5xl mx-auto space-y-6">
 
@@ -86,6 +89,14 @@ export default {
                         </label>
                     </div>
 
+                    <div class="flex items-center justify-between bg-gray-900/50 p-3 rounded-lg border border-gray-800">
+                        <div class="w-full">
+                            <p class="text-sm font-bold text-gray-300">AMP Discovery Pfade</p>
+                            <p class="text-[10px] text-gray-500 mt-0.5">Zusätzliche Pfade (kommagetrennt) für die automatische AMP-Instanz-Suche.</p>
+                            <input type="text" v-model="store.sysConfig.amp_discovery_paths" @blur="api.saveSysConfig()" placeholder="z.B. /mnt/amp/instances" class="mt-2 w-full bg-gray-950 border border-gray-700 text-xs text-white p-2 rounded outline-none focus:border-orange-500 font-mono">
+                        </div>
+                    </div>
+
                     <button @click="api.openLogViewer()" class="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold p-2.5 rounded-lg text-xs transition border border-gray-700 cursor-pointer">📄 System-Logbuch ansehen</button>
                 </div>
 
@@ -117,6 +128,28 @@ export default {
                 <p class="text-xs text-gray-400 mt-2">Importiere bestehende ARK: Survival Ascended Server aus einer bestehenden AMP-Installation. Gib dazu den absoluten Pfad zum AMP-Instanzordner (z.B. <span class="font-mono text-gray-500">C:\\AMPDatastore\\Instances\\ASA01</span>) an.</p>
                 
                 <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <button @click="discoverInstances" :disabled="isDiscovering" class="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold py-2 px-4 rounded-lg border border-gray-700 transition flex items-center gap-2">
+                            <svg v-if="isDiscovering" class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            AMP-Instanzen suchen
+                        </button>
+                    </div>
+
+                    <div v-if="discoveryTried && discoveredInstances.length === 0" class="text-xs text-orange-400 bg-orange-950/30 p-3 rounded-lg border border-orange-900/50">
+                        Keine Instanzen gefunden. Prüfe ggf. die AMP Discovery Pfade in den Einstellungen.
+                    </div>
+                    
+                    <div v-if="discoveredInstances.length > 0" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                        <div v-for="inst in discoveredInstances" :key="inst.instance_path" class="bg-gray-900 border border-gray-800 rounded-lg p-3 flex flex-col justify-between">
+                            <div>
+                                <p class="text-sm font-bold text-white truncate" :title="inst.session_name">{{ inst.session_name || inst.instance_name }}</p>
+                                <p class="text-[10px] text-gray-500 mt-1">Map: {{ inst.map }} | Port: {{ inst.port }}</p>
+                                <p class="text-[10px] text-gray-600 mt-1 truncate" :title="inst.instance_path">{{ inst.instance_path }}</p>
+                            </div>
+                            <button @click="selectInstance(inst.instance_path)" class="mt-3 w-full bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-1.5 rounded transition">Auswählen</button>
+                        </div>
+                    </div>
+                    
                     <input type="text" v-model="store.ampImportPath" placeholder="Absoluter Pfad zur AMP-Instanz..." class="w-full bg-gray-900 border border-gray-800 text-sm text-white p-3 rounded-lg outline-none focus:border-orange-500 font-mono">
                     
                     <div class="flex items-center gap-4 bg-gray-900/50 p-3 rounded-lg border border-gray-800">
@@ -166,6 +199,27 @@ export default {
     </div>
     `,
     methods: {
+        async discoverInstances() {
+            this.isDiscovering = true;
+            this.discoveryTried = false;
+            try {
+                const res = await fetch('/api/system/importer/discover');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.discoveredInstances = data.instances || [];
+                    this.discoveryTried = true;
+                } else {
+                    api.alert(data.message, 'Fehler bei der Suche');
+                }
+            } catch (e) {
+                console.error(e);
+                api.alert('Netzwerkfehler', 'Fehler');
+            }
+            this.isDiscovering = false;
+        },
+        selectInstance(path) {
+            store.ampImportPath = path;
+        },
         async importAmpServer() {
             if (!store.ampImportPath) return;
             store.isActionLoading = true;

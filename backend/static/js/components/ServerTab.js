@@ -1,6 +1,52 @@
 import { store, api, currentServerData, filteredGroupedConfigFields } from '../store.js';
 
 export default {
+    methods: {
+        async renameServer() {
+            if (store.serverStats?.status === 'online') {
+                api.alert('Der Server muss offline sein, bevor er umbenannt werden kann.', 'Umbennenen nicht möglich');
+                return;
+            }
+            
+            const newId = await api.prompt(
+                'Gib eine neue ID für diesen Server ein.\n\n⚠️ WARNUNG:\n- Der Server muss offline sein.\n- Alle Serverdateien und Backups werden verschoben.\n- Firewall-Regeln werden neu erstellt.\n- Nur a-z, 0-9 und _ sind erlaubt.',
+                store.activeServerId,
+                'z.B. mein_asa_server',
+                'Server umbenennen'
+            );
+            
+            if (!newId || newId === store.activeServerId) return;
+            
+            store.isActionLoading = true;
+            store.loadingMessage = "Server wird umbenannt...";
+            
+            try {
+                const res = await fetch(`/api/server/rename/${store.activeServerId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_id: newId })
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    if (data.warnings && data.warnings.length > 0) {
+                        api.alert('Server wurde umbenannt, aber es gab Warnungen:\n' + data.warnings.join('\n'), 'Erfolgreich mit Warnungen');
+                    }
+                    // Select new server
+                    store.activeServerId = data.new_id;
+                    await api.loadInstalledPlugins();
+                    await api.loadServerStats(data.new_id);
+                } else {
+                    api.alert(data.message, '❌ Fehler beim Umbenennen');
+                }
+            } catch (e) {
+                console.error(e);
+                api.alert('Netzwerkfehler', 'Fehler');
+            }
+            
+            store.isActionLoading = false;
+        }
+    },
     setup() { 
         const formatLog = (text) => {
             if (!text) return '';
@@ -25,9 +71,14 @@ export default {
                 <h1 class="text-2xl font-black text-white tracking-wide truncate">{{ currentServerData?.server_name || 'Lade...' }}</h1>
                 <p class="text-sm text-gray-500 font-mono mt-1">Engine: <span class="text-gray-400">{{ currentServerData?.game_name || '...' }}</span></p>
             </div>
-            <button @click="api.deleteServer()" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-red-950/30 border border-red-900/50 hover:bg-red-900 hover:border-red-500 text-red-400 hover:text-white shadow-sm">
-                🗑️ Server löschen
-            </button>
+            <div class="flex items-center gap-3">
+                <button @click="renameServer()" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-gray-900 border border-gray-800 hover:bg-gray-800 text-gray-300 hover:text-white shadow-sm">
+                    ✏️ Umbenennen
+                </button>
+                <button @click="api.deleteServer()" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-red-950/30 border border-red-900/50 hover:bg-red-900 hover:border-red-500 text-red-400 hover:text-white shadow-sm">
+                    🗑️ Server löschen
+                </button>
+            </div>
         </div>
         
         <div class="flex flex-col md:flex-row gap-6 items-start">

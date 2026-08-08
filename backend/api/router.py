@@ -413,6 +413,61 @@ def get_installed_plugins():
                 except: pass
     return installed
 
+class RenamePayload(BaseModel):
+    new_id: str
+
+@router.post("/server/rename/{plugin_id}")
+async def rename_server(plugin_id: str, payload: RenamePayload):
+    import re
+    from core.env import PLUGINS_ROOT, DEV_PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT
+    from core.server_manager import server_manager
+    
+    new_id = payload.new_id.strip()
+    if not re.match(r'^[a-z0-9_]+$', new_id):
+        return {"status": "error", "message": "Die neue ID darf nur Kleinbuchstaben, Zahlen und Unterstriche enthalten."}
+        
+    _, _, is_dev = ConfigManager.get_plugin_paths(plugin_id)
+    if is_dev:
+        return {"status": "error", "message": "DEV-Plugins können nicht umbenannt werden."}
+        
+    if server_manager.is_server_online(plugin_id):
+        return {"status": "error", "message": "Der Server muss gestoppt sein, bevor er umbenannt werden kann."}
+        
+    # Check if new_id already exists anywhere
+    if os.path.exists(os.path.join(PLUGINS_ROOT, new_id)) or \
+       os.path.exists(os.path.join(DEV_PLUGINS_ROOT, new_id)) or \
+       os.path.exists(os.path.join(SERVERS_ROOT, new_id)) or \
+       os.path.exists(os.path.join(DATA_ROOT, new_id)):
+        return {"status": "error", "message": "Die neue ID existiert bereits."}
+        
+    res = ConfigManager.rename_plugin(plugin_id, new_id)
+    if res["status"] == "error":
+        return res
+        
+    warnings = res.get("warnings", [])
+    
+    # Update memory caches
+    if plugin_id in game_update_cache:
+        game_update_cache[new_id] = game_update_cache[plugin_id]
+        del game_update_cache[plugin_id]
+    if plugin_id in disk_cache:
+        disk_cache[new_id] = disk_cache[plugin_id]
+        del disk_cache[plugin_id]
+        
+    # Update Firewall Rules
+    import platform
+    import subprocess
+    if platform.system() == "Windows":
+        try:
+            # Delete old rules
+            subprocess.run(["powershell", "-Command", f"Remove-NetFirewallRule -DisplayName 'EmberCore_{plugin_id}_*' -ErrorAction SilentlyContinue"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            # Recreate with new ID
+            setup_network(new_id)
+        except Exception as e:
+            warnings.append(f"Konnte Firewall-Regeln nicht migrieren: {e}")
+            
+    return {"status": "success", "new_id": new_id, "warnings": warnings}
+
 @router.get("/server/manifest/{plugin_id}")
 def get_server_manifest(plugin_id: str):
     manifest = ConfigManager.load_manifest(plugin_id)
@@ -511,6 +566,17 @@ async def get_amp_import_status(task_id: str):
         return {"status": "error", "message": "Task nicht gefunden."}
     return IMPORT_TASKS[task_id]
 
+@router.get("/system/importer/discover")
+async def discover_amp_instances_endpoint():
+    from core import amp_importer
+    from core.env import sys_config
+    
+    discovery_paths_str = sys_config.get("amp_discovery_paths", "")
+    custom_paths = [p.strip() for p in discovery_paths_str.split(",")] if discovery_paths_str else []
+    
+    instances = amp_importer.discover_amp_instances(custom_paths)
+    return {"status": "success", "instances": instances}
+
 @router.post("/system/importer/amp")
 async def import_amp_server(background_tasks: BackgroundTasks, data: dict = Body(...)):
     import shutil
@@ -522,19 +588,12 @@ async def import_amp_server(background_tasks: BackgroundTasks, data: dict = Body
     if not amp_path or not os.path.exists(amp_path):
         return {"status": "error", "message": "Der angegebene Pfad existiert nicht."}
         
-    # Auto-detect game type
-    is_asa = False
-    src_dir = None
+    from core import amp_importer
     
-    if os.path.exists(os.path.join(amp_path, "ARK Survival Ascended", "ShooterGame")):
-        is_asa = True
-        src_dir = os.path.join(amp_path, "ARK Survival Ascended")
-    elif os.path.exists(os.path.join(amp_path, "ShooterGame")):
-        is_asa = True
-        src_dir = amp_path
-        
-    if not is_asa or not src_dir:
-        return {"status": "error", "message": "Derzeit werden nur ASA-Server vom Importer unterstützt. Konnte 'ShooterGame' nicht finden."}
+    src_dir = amp_importer.find_shootergame_root(amp_path)
+    if not src_dir:
+        return {"status": "error", "message": "Derzeit werden nur ASA-Server vom Importer unterstützt. Konnte 'ShooterGame' im angegebenen Pfad nicht finden (weder direkt noch in den Unterordnern)."}
+    is_asa = True
         
     # Generate unique plugin ID
     safe_name = os.path.basename(os.path.normpath(amp_path))
@@ -567,26 +626,7 @@ async def import_amp_server(background_tasks: BackgroundTasks, data: dict = Body
                 manifest_data["source_url"] = manifest_url
 
                 # Parse AMPConfig.conf if it exists
-                amp_config_path = os.path.join(amp_path, "AMPConfig.conf")
-                ext_conf = {}
-                if os.path.exists(amp_config_path):
-                    try:
-                        with open(amp_config_path, "r", encoding="utf-8") as f:
-                            for line in f:
-                                if '=' not in line: continue
-                                key, val = line.split('=', 1)
-                                key, val = key.strip(), val.strip()
-                                k_lower = key.lower()
-                                if "sessionname" in k_lower or "servername" in k_lower: ext_conf["SessionName"] = val
-                                elif "maxplayers" in k_lower: ext_conf["MaxPlayers"] = int(val) if val.isdigit() else 20
-                                elif "map" in k_lower and "url" not in k_lower: ext_conf["Map"] = val
-                                elif "serverpassword" in k_lower: ext_conf["ServerPassword"] = val
-                                elif "adminpassword" in k_lower: ext_conf["ServerAdminPassword"] = val
-                                elif "queryport" in k_lower: ext_conf["QueryPort"] = val
-                                elif "rconport" in k_lower: ext_conf["RCONPort"] = val
-                                elif "portnumber" in k_lower or "gameport" in k_lower: ext_conf["Port"] = val
-                    except Exception as e:
-                        logger.error(f"[!] Fehler beim Parsen von AMPConfig.conf: {e}")
+                ext_conf = amp_importer.parse_amp_config(amp_path)
 
                 # Update Manifest default_args and network_meta with extracted ports
                 if "Port" in ext_conf or "QueryPort" in ext_conf or "RCONPort" in ext_conf:
