@@ -88,7 +88,7 @@ export default {
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    api.alert(\`Transfer abgeschlossen.\\n\${data.transferred} Mods übertragen auf \${data.targets.length} Server.\`, 'Erfolgreich');
+                    api.alert(`Transfer abgeschlossen.\n${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfolgreich');
                 } else {
                     api.alert(data.message, 'Fehler');
                 }
