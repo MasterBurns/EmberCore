@@ -1,17 +1,14 @@
 [
   {
 <<<<<<< HEAD
-  "version": "v0.2.0.6",
+  "version": "v0.2.0.5",
   "build_date": "2026-08-08",
   "changelog": [
     "BUGFIX: Commandline-Generierung robuster gemacht. Fehlerhafte Quotes in Server-Namen entfernt, die die EOS-Registrierung lautlos scheitern ließen. Zudem verhindert das intelligente Arg-Mapping nun doppelte Parameter (wie SessionName) und erzwingt saubere Argumente."
   ]
   },
   {
-  "version": "v0.2.0.5",
-=======
   "version": "v0.2.0.4",
->>>>>>> 92b6717618cdb2a5bdf99986211e152fc98805d5
   "build_date": "2026-08-08",
   "changelog": [
     "BUGFIX: ASA Server Sichtbarkeit komplett repariert. ASA benötigt zwingend eine englische Lokalisierung in der Config ([Internationalization] Culture=en), andernfalls schlägt die Epic Online Services (EOS) Registrierung lautlos fehl (Erkennbar am leeren 'Server Region' Log). Dieses Feld wird nun standardmäßig erzwungen und repariert."
