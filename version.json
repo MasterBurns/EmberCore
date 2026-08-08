@@ -1,5 +1,13 @@
 [
   {
+  "version": "v0.2.0.19",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "FEATURE: Server-Installation und Updates laufen jetzt komplett asynchron mit Live-Progress-Bar.",
+    "FEATURE: Installationen können nun jederzeit sicher abgebrochen werden, ohne Datenkorruption zu riskieren."
+  ]
+  },
+  {
   "version": "v0.2.0.18",
   "build_date": "2026-08-09",
   "changelog": [
