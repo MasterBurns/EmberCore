@@ -48,10 +48,10 @@ export default {
         async resolveMods() {
             api.setServerLoading(store.selectedPlugin, "Löse Mods auf...");
             try {
-                const res = await fetch(\`/api/server/mods/resolve/\${store.selectedPlugin}\`, { method: 'POST' });
+                const res = await fetch(`/api/server/mods/resolve/${store.selectedPlugin}`, { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    api.alert(\`Es wurden \${data.resolved_count} Mods aufgelöst.\`, 'Erfolgreich');
+                    api.alert(`Es wurden ${data.resolved_count} Mods aufgelöst.`, 'Erfolgreich');
                     await api.loadServerMods(store.selectedPlugin);
                 } else {
                     api.alert(data.message, 'Fehler');
