@@ -172,7 +172,7 @@ $btnUpdate.Add_Click({
     Stop-Service -Name "EmberCore" -ErrorAction SilentlyContinue | Out-Null
     Stop-Process -Name "EmberCore" -Force -ErrorAction SilentlyContinue | Out-Null
     Stop-Process -Name "EmberCoreService" -Force -ErrorAction SilentlyContinue | Out-Null
-    taskkill /F /IM EmberCore.exe /T 2>&1 | Out-Null
+    cmd /c "taskkill /F /IM EmberCore.exe /T 2>nul"
     
     Start-Sleep -Seconds 3
     

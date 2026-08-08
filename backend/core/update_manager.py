@@ -1,6 +1,55 @@
 import os, sys, platform, subprocess, asyncio, urllib.request, zipfile, tarfile, io, httpx, shutil
 from core.env import EXE_DIR, SERVERS_ROOT, IS_COMPILED, logger
 
+PS1_WORKER = """
+$ErrorActionPreference = 'SilentlyContinue'
+$Dir  = $PSScriptRoot
+$Log  = Join-Path $Dir 'updater_log.txt'
+$ExeName = '{EXE_BASENAME}'   # einmalig per Python einsetzen, ASCII-sicher
+$Exe  = Join-Path $Dir $ExeName
+$Arch = Join-Path $Dir 'EmberCore_update.zip'
+$Bak  = Join-Path $Dir 'updater_backup'
+function Log($m) { Add-Content -Path $Log -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }
+function Start-Ember {
+    $svc = Get-Service -Name 'EmberCore' -ErrorAction SilentlyContinue
+    if ($svc) { Start-Service -Name 'EmberCore'; Log 'Start via Windows-Dienst.' }
+    elseif (Test-Path $Exe) { Start-Process -FilePath $Exe -WorkingDirectory $Dir; Log 'Start via EXE.' }
+    else { Log 'KRITISCH: EXE fehlt (Antivirus-Quarantaene?)!' }
+}
+try {
+    Log '=== Update-Worker gestartet ==='
+    Start-Sleep -Seconds 2
+    Log 'Beende Dienst/Prozess (Watchdog bleibt als Safety-Net alive)...'
+    Stop-Service -Name 'EmberCore' -ErrorAction SilentlyContinue
+    cmd /c "taskkill /F /IM $ExeName 2>nul"
+    Start-Sleep -Seconds 3
+    Log 'Backup der alten EXE...'
+    if (Test-Path $Bak) { Remove-Item $Bak -Recurse -Force }
+    New-Item -ItemType Directory -Path $Bak -Force | Out-Null
+    if (Test-Path $Exe) { Copy-Item $Exe (Join-Path $Bak $ExeName) -Force }
+    Remove-Item $Exe -Force -ErrorAction SilentlyContinue
+    if (Test-Path $Exe) { Rename-Item $Exe "$ExeName.old" -Force }
+    Log 'Entpacke Update...'
+    $ok = $false
+    try { Expand-Archive -Path $Arch -DestinationPath $Dir -Force; $ok = $true } catch { Log "Expand-Archive Fehler: $_" }
+    if (-not $ok) {
+        try { Add-Type -AssemblyName System.IO.Compression.FileSystem
+              [System.IO.Compression.ZipFile]::ExtractToDirectory($Arch, $Dir, $true); $ok = $true } catch { Log "Fallback Fehler: $_" }
+    }
+    Remove-Item $Arch -Force -ErrorAction SilentlyContinue
+    if (-not $ok -or -not (Test-Path $Exe)) {
+        Log 'Rollback: stelle alte EXE aus Backup wieder her.'
+        Copy-Item (Join-Path $Bak $ExeName) $Exe -Force
+    }
+    Start-Ember
+    Log '=== Update-Worker beendet ==='
+} catch {
+    Log "Unerwarteter Fehler: $_"
+    if (-not (Test-Path $Exe)) { Copy-Item (Join-Path $Bak $ExeName) $Exe -Force }
+    Start-Ember
+}
+"""
+
 class UpdateManager:
     async def prepare_steamcmd(self):
         steam_dir = os.path.join(SERVERS_ROOT, "steamcmd")
@@ -152,84 +201,9 @@ class UpdateManager:
                     subprocess.Popen(["bash", script_path], cwd=EXE_DIR, start_new_session=True)
                 else:
                     ps_path = os.path.join(EXE_DIR, "update_worker.ps1")
-                    log_file = os.path.join(EXE_DIR, "updater_log.txt")
-                    exe_name_no_ext = os.path.splitext(os.path.basename(current_exe_path))[0]
-                    with open(ps_path, "w", encoding="utf-8") as f:
-                        f.write(f"$ErrorActionPreference = 'Stop'\n")
-                        f.write(f"$LogFile = '{log_file}'\n")
-                        f.write("Function Log($msg) { Add-Content -Path $LogFile -Value \"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg\" }\n\n")
-                        f.write("Log 'Starte Update...'\n")
-                        f.write("Start-Sleep -Seconds 2\n\n")
-                        f.write("Log 'Beende Dienste...'\n")
-                        f.write("Stop-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
-                        f.write("Start-Sleep -Seconds 2\n\n")
-                        f.write("Log 'Beende Prozesse...'\n")
-                        f.write("Stop-Process -Name 'EmberCore' -Force -ErrorAction SilentlyContinue | Out-Null\n")
-                        f.write("Stop-Process -Name 'EmberCoreService' -Force -ErrorAction SilentlyContinue | Out-Null\n")
-                        f.write(f"Stop-Process -Name '{exe_name_no_ext}' -Force -ErrorAction SilentlyContinue | Out-Null\n")
-                        f.write(f"taskkill /F /IM {os.path.basename(current_exe_path)} 2>&1 | Out-Null\n")
-                        f.write("Start-Sleep -Seconds 3\n\n")
-                        f.write("Log 'Erstelle Notfall-Backup...'\n")
-                        f.write(f"$backupDir = Join-Path '{EXE_DIR}' 'updater_backup'\n")
-                        f.write("if (Test-Path $backupDir) { Remove-Item $backupDir -Recurse -Force }\n")
-                        f.write("New-Item -ItemType Directory -Force -Path $backupDir | Out-Null\n")
-                        f.write(f"Copy-Item -Path '{current_exe_path}' -Destination $backupDir -Force\n\n")
-                        f.write("Log 'Entsperre alte ausführbare Datei...'\n")
-                        f.write(f"if (Test-Path '{current_exe_path}') {{\n")
-                        f.write(f"    Remove-Item -Path '{current_exe_path}' -Force -ErrorAction SilentlyContinue\n")
-                        f.write(f"    if (Test-Path '{current_exe_path}') {{\n")
-                        f.write(f"        Rename-Item -Path '{current_exe_path}' -NewName '{os.path.basename(current_exe_path)}.old' -Force -ErrorAction SilentlyContinue\n")
-                        f.write("    }\n")
-                        f.write("}\n\n")
-                        f.write("Log 'Entpacke Update...'\n")
-                        f.write("try {\n")
-                        f.write(f"    Expand-Archive -Path '{archive_path}' -DestinationPath '{EXE_DIR}' -Force\n")
-                        f.write("    Log 'Entpacken erfolgreich.'\n")
-                        f.write("} catch {\n")
-                        f.write("    Log \"Expand-Archive fehlgeschlagen: $_. Versuche Deep-Fallback (.NET ZipFile)...\"\n")
-                        f.write("    try {\n")
-                        f.write("        Add-Type -AssemblyName System.IO.Compression.FileSystem\n")
-                        f.write(f"        [System.IO.Compression.ZipFile]::ExtractToDirectory('{archive_path}', '{EXE_DIR}', $true)\n")
-                        f.write("        Log 'Deep-Fallback Entpacken erfolgreich.'\n")
-                        f.write("    } catch {\n")
-                        f.write("        Log \"KRITISCHER FEHLER: Entpacken final gescheitert: $_\"\n")
-                        f.write(f"        Remove-Item -Path '{archive_path}' -Force\n")
-                        f.write("        Log 'Abbruch. Starte alte Version...'\n")
-                        if "--service" in sys.argv:
-                            f.write("        Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
-                        else:
-                            f.write(f"        Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
-                        f.write("        Remove-Item -Path $PSCommandPath -Force\n")
-                        f.write("        exit\n")
-                        f.write("    }\n")
-                        f.write("}\n")
-                        f.write(f"Remove-Item -Path '{archive_path}' -Force\n\n")
-                        f.write("Log 'Starte System neu...'\n")
-                        if "--service" in sys.argv:
-                            f.write("Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
-                        else:
-                            f.write(f"Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
-                        f.write("\nLog 'Warte 15 Sekunden auf Health-Check...'\n")
-                        f.write("Start-Sleep -Seconds 15\n")
-                        f.write("$isRunning = $false\n")
-                        if "--service" in sys.argv:
-                            f.write("$svc = Get-Service -Name 'EmberCore' -ErrorAction SilentlyContinue\n")
-                            f.write("if ($svc -and $svc.Status -eq 'Running') { $isRunning = $true }\n")
-                        else:
-                            f.write(f"$proc = Get-Process -Name '{exe_name_no_ext}' -ErrorAction SilentlyContinue\n")
-                            f.write("if ($proc) { $isRunning = $true }\n")
-                        f.write("if (-not $isRunning) {\n")
-                        f.write("    Log 'KRITISCHER FEHLER: Neue Version läuft nicht! Führe ROLLBACK durch...'\n")
-                        f.write(f"    Copy-Item -Path (Join-Path $backupDir '{os.path.basename(current_exe_path)}') -Destination '{current_exe_path}' -Force\n")
-                        f.write("    Log 'Rollback abgeschlossen. Starte alte Version...'\n")
-                        if "--service" in sys.argv:
-                            f.write("    Start-Service -Name 'EmberCore' -ErrorAction SilentlyContinue | Out-Null\n")
-                        else:
-                            f.write(f"    Start-Process -FilePath '{current_exe_path}' -ArgumentList '{' '.join(sys.argv[1:])}' -WindowStyle Normal\n")
-                        f.write("} else {\n")
-                        f.write("    Log 'Health-Check OK. Update erfolgreich abgeschlossen.'\n")
-                        f.write("}\n")
-                        f.write("Remove-Item -Path $PSCommandPath -Force\n")
+                    # WICHTIG: utf-8-sig (BOM)! PowerShell 5.1 liest BOM-lose Skripte als ANSI -> Umlaut-Pfade kaputt
+                    with open(ps_path, "w", encoding="utf-8-sig") as f:
+                        f.write(PS1_WORKER.replace('{EXE_BASENAME}', os.path.basename(current_exe_path)))
                     
                     flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if platform.system() == "Windows" else 0
                     subprocess.Popen(["powershell", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_path], cwd=EXE_DIR, creationflags=flags)
