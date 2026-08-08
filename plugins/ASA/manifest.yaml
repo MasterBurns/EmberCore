@@ -33,6 +33,7 @@ default_args:
   - "TheIsland_WP?listen?MultiHome=0.0.0.0?Port=7777?QueryPort=27015?RCONEnabled=True?RCONPort=27020"
   - "-server"
   - "-log"
+  - "-culture=en"
   - "-NoTransferFromFiltering"
   - "-NoBattlEye"
   - "-automanagedmods"
@@ -84,7 +85,7 @@ config_meta:
   file_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
   format: "ini"
   arg_mapping:
-    SessionName: "?SessionName=\"{value}\""
+    SessionName: "?SessionName={value}"
     MaxPlayers: "?MaxPlayers={value}"
   fields:
     # --- LOKALISIERUNG / REGION BUGFIX ---

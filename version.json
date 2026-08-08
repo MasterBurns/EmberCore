@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.6",
+  "build_date": "2026-08-08",
+  "changelog": [
+    "BUGFIX: Commandline-Generierung robuster gemacht. Fehlerhafte Quotes in Server-Namen entfernt, die die EOS-Registrierung lautlos scheitern ließen. Zudem verhindert das intelligente Arg-Mapping nun doppelte Parameter (wie SessionName) und erzwingt saubere Argumente."
+  ]
+  },
+  {
   "version": "v0.2.0.5",
   "build_date": "2026-08-08",
   "changelog": [

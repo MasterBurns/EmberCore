@@ -61,7 +61,7 @@ config_meta:
   file_path: "ConanSandbox/Saved/Config/WindowsServer/ServerSettings.ini"
   format: "ini"
   arg_mapping:
-    ServerName: "-ServerName=\"{value}\""
+    ServerName: "-ServerName={value}"
     MaxPlayers: "-MaxPlayers={value}"
   fields:
     # -- Basis-Einstellungen --

@@ -877,9 +877,35 @@ def start(plugin_id: str):
                     # Für ASA: Argumente, die mit ? anfangen, an den Map-String anhängen
                     if template.startswith("?"):
                         if args and ("?" in args[0] or args[0].endswith("_WP") or args[0].lower() in ["theisland", "scorchedearth", "aberration"]):
-                            args[0] += template.replace("{value}", val)
+                            import re
+                            param_name = template.split("=")[0].strip("?")  # z.B. SessionName
+                            new_param = template.replace("{value}", val).strip("?")
+                            
+                            if f"?{param_name}=" in args[0]:
+                                # Ersetze den alten Wert
+                                args[0] = re.sub(rf"\?{param_name}=[^?]*", f"?{new_param}", args[0])
+                            else:
+                                # Hänge ihn neu an
+                                args[0] += f"?{new_param}"
                     else:
-                        args.append(template.replace("{value}", val))
+                        # Für normale Argumente (wie -ServerName=... für Conan)
+                        import re
+                        if "=" in template:
+                            param_name = template.split("=")[0] # z.B. -ServerName
+                            new_param = template.replace("{value}", val)
+                            
+                            # Check if parameter already exists in args
+                            replaced = False
+                            for i in range(len(args)):
+                                if args[i].startswith(f"{param_name}="):
+                                    args[i] = new_param
+                                    replaced = True
+                                    break
+                            
+                            if not replaced:
+                                args.append(new_param)
+                        else:
+                            args.append(template.replace("{value}", val))
                         
             logger.info(f"[*] Arg Mapping: {len(arg_mapping)} Parameter in Kommandozeile injiziert.")
         except Exception as e:
