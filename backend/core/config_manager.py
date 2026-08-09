@@ -400,7 +400,7 @@ class ConfigManager:
         """
         if "cluster_meta" not in manifest: return
 
-        server_dir = ConfigManager.get_server_dir(plugin_id)
+        server_dir = os.path.join(SERVERS_ROOT, plugin_id)
 
         for rule in manifest["cluster_meta"].get("enforce_files", []):
             file_path = os.path.abspath(os.path.join(server_dir, rule["file_path"]))
