@@ -232,7 +232,7 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
                             <span class="text-xs text-gray-400 font-mono">{{ Math.round(store.installTasks[store.selectedPlugin]?.progress || 0) }}%</span>
                         </div>
                         <div class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
-                            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="`width: ${store.installTasks[store.selectedPlugin]?.progress || 0}%`"></div>
+                            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="'width: ' + (store.installTasks[store.selectedPlugin]?.progress || 0) + '%'"></div>
                         </div>
                         <div class="flex justify-between items-center">
                             <p class="text-xs text-gray-400 truncate pr-4">{{ store.installTasks[store.selectedPlugin]?.message }}</p>
