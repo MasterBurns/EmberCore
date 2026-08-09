@@ -53,7 +53,8 @@ export const store = reactive({
     installInterval: null,
     ampImportPath: "",
     ampImportMode: "move",
-    pluginManifest: null
+    pluginManifest: null,
+    pollErrors: {}
 });
 
 export const categorizedPlugins = computed(() => {
@@ -165,12 +166,12 @@ export const api = {
         const currentPlugin = store.selectedPlugin;
         try {
             const res = await fetch(`/api/server/stats/${currentPlugin}`);
-            if (res.ok) { 
-                const data = await res.json();
-                if (store.selectedPlugin !== currentPlugin) return;
-                store.serverStats = data; 
-                this.loadInstalledPlugins(); 
-            }
+            if (!res.ok) throw new Error("Network response was not ok");
+            const data = await res.json();
+            if (store.selectedPlugin !== currentPlugin) return;
+            store.serverStats = data; 
+            this.loadInstalledPlugins(); 
+            
             if (store.serverStats.status === 'online') { 
                 const diagRes = await fetch(`/api/server/diagnostics/${currentPlugin}`); 
                 if (diagRes.ok) {
@@ -189,7 +190,10 @@ export const api = {
                     if (logData.logs.length !== oldLen) { setTimeout(() => { const el = document.getElementById('console-output'); if(el) el.scrollTop = el.scrollHeight; }, 50); }
                 }
             }
-        } catch (err) {}
+            store.pollErrors[currentPlugin] = 0;
+        } catch (err) {
+            store.pollErrors[currentPlugin] = (store.pollErrors[currentPlugin] || 0) + 1;
+        }
     },
     async checkGameUpdate() { 
         const pId = store.selectedPlugin;
@@ -209,9 +213,10 @@ export const api = {
         store.currentView = "server"; 
         store.serverTab = "status"; 
         store.serverStats.disk = null; 
-        store.consoleLogs = []; 
+        store.listData = null;
         store.configData = { enabled: false, fields: [], unknown_fields: [], values: {} };
-        this.fetchStats(); 
+        store.originalConfigValues = null;
+        store.startupData = { enabled: false, selected_map: '', show_external_console: false, show_in_discord: true };
         
         const currentPlugin = store.selectedPlugin;
         // Map sofort laden
@@ -248,6 +253,8 @@ export const api = {
                 if (data.unknown_fields) { data.unknown_fields.forEach(f => { if (f.type === 'boolean') { const val = data.values[f.key]; data.values[f.key] = (val === true || String(val).toLowerCase() === "true"); } }); }
             }
             store.configData = data;
+            if (data.values) store.originalConfigValues = JSON.parse(JSON.stringify(data.values));
+            else store.originalConfigValues = null;
         }
     },
     async saveMap() {
@@ -296,10 +303,16 @@ export const api = {
             });
             const data = await res.json();
             await this.alert(data.message, data.status === "success" ? "Ports gespeichert" : "Fehler");
+            
+            // Reload network data directly
+            if (data.status === "success") {
+                await this.openNetworkTab();
+            }
         } catch (e) {
             await this.alert("Netzwerkfehler beim Speichern der Ports.", "Fehler");
+        } finally {
+            this.setServerLoading(pId, null);
         }
-        store.isActionLoading = false;
     },
     async triggerNetworkSetup() { 
         const pId = store.selectedPlugin;
@@ -368,8 +381,35 @@ export const api = {
         this.fetchMods(); 
     },
     openBackupTab() { store.serverTab = 'backups'; this.fetchBackups(); this.fetchBackupSchedule(); },
-    async fetchBackups() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/list/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin === currentPlugin) store.backupList = data; } },
-    async fetchBackupSchedule() { const currentPlugin = store.selectedPlugin; const res = await fetch(`/api/server/backup/schedule/${currentPlugin}`); if (res.ok) { const data = await res.json(); if (store.selectedPlugin !== currentPlugin) return; if (!data.schedules) data.schedules = []; if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3}; store.backupSchedule = data; } },
+    async fetchBackups() { 
+        const currentPlugin = store.selectedPlugin; 
+        if(!currentPlugin) return;
+        try {
+            const res = await fetch(`/api/server/backup/list/${currentPlugin}`); 
+            if (!res.ok) throw new Error("fetch fail");
+            const data = await res.json(); 
+            if (store.selectedPlugin === currentPlugin) store.backupList = data; 
+            store.pollErrors[currentPlugin] = 0;
+        } catch(e) {
+            store.pollErrors[currentPlugin] = (store.pollErrors[currentPlugin] || 0) + 1;
+        }
+    },
+    async fetchBackupSchedule() { 
+        const currentPlugin = store.selectedPlugin; 
+        if(!currentPlugin) return;
+        try {
+            const res = await fetch(`/api/server/backup/schedule/${currentPlugin}`); 
+            if (!res.ok) throw new Error("fetch fail");
+            const data = await res.json(); 
+            if (store.selectedPlugin !== currentPlugin) return; 
+            if (!data.schedules) data.schedules = []; 
+            if (!data.retention) data.retention = {keep_latest: 5, keep_daily: 7, keep_weekly: 4, keep_monthly: 3}; 
+            store.backupSchedule = data; 
+            store.pollErrors[currentPlugin] = 0;
+        } catch(e) {
+            store.pollErrors[currentPlugin] = (store.pollErrors[currentPlugin] || 0) + 1;
+        }
+    },
     async subscribePlugin(plugin) {
         const customName = await this.prompt(`Bitte gib einen Namen für deinen neuen '${plugin.name}' Server ein:`, "Mein Server", "z.B. PvE The Island", "Neuen Server installieren");
         if (customName === null || customName.trim() === "") return;
@@ -395,9 +435,10 @@ export const api = {
         }
         
         this.loadInstalledPlugins(); 
+        if (store.configData?.values) store.originalConfigValues = JSON.parse(JSON.stringify(store.configData.values));
         await this.alert("Die Konfiguration wurde erfolgreich gespeichert.", "Erfolg"); 
     },
-    async installServer() { 
+    async installServer() {
         const pId = store.selectedPlugin;
         const res = await fetch(`/api/server/install/${pId}`, { method: 'POST' }); 
         const data = await res.json();
@@ -412,7 +453,7 @@ export const api = {
             store.installInterval = setInterval(async () => {
                 try {
                     const res = await fetch(`/api/server/install/status_all`);
-                    if (!res.ok) return;
+                    if (!res.ok) throw new Error("fetch fail");
                     const data = await res.json();
                     
                     for (const [pId, task] of Object.entries(data)) {
@@ -432,8 +473,10 @@ export const api = {
                     for (const pId of Object.keys(store.installTasks)) {
                         if (!data[pId]) delete store.installTasks[pId];
                     }
-                    
-                } catch(e) {}
+                    store.pollErrors['__global__'] = 0;
+                } catch(e) {
+                    store.pollErrors['__global__'] = (store.pollErrors['__global__'] || 0) + 1;
+                }
             }, 1500);
         }
     },

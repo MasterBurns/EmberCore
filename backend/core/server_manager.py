@@ -1,4 +1,4 @@
-import os, psutil, time, platform, subprocess, socket, struct, threading, json, shutil
+import os, psutil, time, platform, subprocess, socket, struct, threading, json, shutil, re
 from collections import deque
 from core.env import SERVERS_ROOT, DATA_ROOT, logger, sys_config
 from core.config_manager import ConfigManager
@@ -215,6 +215,31 @@ class ServerManager:
             logger.error(f"Fehler beim Starten: {e}")
             return {"status": "error", "message": str(e)}
 
+    def _rcon_roundtrip(self, s, req_id, req_type, body):
+        payload = struct.pack('<ii', req_id, req_type) + body.encode('utf-8') + b'\x00\x00'
+        s.sendall(struct.pack('<i', len(payload)) + payload)
+        
+        resp_len_data = b""
+        while len(resp_len_data) < 4:
+            chunk = s.recv(4 - len(resp_len_data))
+            if not chunk: return None, None, ""
+            resp_len_data += chunk
+            
+        resp_len = struct.unpack('<i', resp_len_data)[0]
+        
+        resp_data = b""
+        while len(resp_data) < resp_len:
+            chunk = s.recv(min(4096, resp_len - len(resp_data)))
+            if not chunk: return None, None, ""
+            resp_data += chunk
+            
+        if len(resp_data) < 8:
+            return None, None, ""
+            
+        resp_id, resp_type = struct.unpack('<ii', resp_data[:8])
+        resp_body = resp_data[8:-2].decode('utf-8', errors='ignore') if len(resp_data) > 9 else ""
+        return resp_id, resp_type, resp_body
+
     def stop_server(self, plugin_id: str):
         logger.info(f"[-] Stoppen von Server '{plugin_id}' angefordert...")
         procs = self.get_server_processes(plugin_id)
@@ -229,64 +254,81 @@ class ServerManager:
             rcon_meta = manifest["shutdown"]["rcon"]
             try:
                 live_cfg = ConfigManager.parse_live_config(os.path.join(SERVERS_ROOT, plugin_id, rcon_meta.get("config_path", "")))
-                port_key = rcon_meta.get("port_key", "RconPort")
                 
-                # Port Fallback Candidates
+                desired_config = {}
+                desired_path = os.path.join(DATA_ROOT, plugin_id, "desired_config.json")
+                if os.path.exists(desired_path):
+                    try:
+                        with open(desired_path, "r", encoding="utf-8") as f:
+                            desired_config = json.load(f)
+                    except: pass
+                
+                # --- Port Candidates ---
                 port_candidates = []
-                p1 = live_cfg.get(port_key)
+                p1 = live_cfg.get(rcon_meta.get("port_key", "RconPort"))
                 if p1: port_candidates.append(int(p1))
-                p2 = rcon_meta.get("port")
-                if p2: port_candidates.append(int(p2))
+                
+                default_args = manifest.get("default_args", [])
+                for arg in default_args:
+                    m = re.search(r"[?\-]RCONPort=(\d+)", arg, re.IGNORECASE)
+                    if m: port_candidates.append(int(m.group(1)))
+                    
+                p3 = rcon_meta.get("port")
+                if p3: port_candidates.append(int(p3))
                 port_candidates.extend([27020, 27015])
                 
                 ports_to_try = []
                 for p in port_candidates:
                     if p not in ports_to_try: ports_to_try.append(p)
                 
-                password = rcon_meta.get("default_password", "")
-                if "password_key" in rcon_meta: password = live_cfg.get(rcon_meta["password_key"], password)
+                # --- Password Candidates ---
+                pw_candidates = []
+                for arg in default_args:
+                    m = re.search(r"[?\-]ServerAdminPassword=([^?\s]+)", arg, re.IGNORECASE)
+                    if m: pw_candidates.append(m.group(1))
+                    
+                pw2 = live_cfg.get(rcon_meta.get("password_key", "ServerAdminPassword"))
+                if pw2: pw_candidates.append(pw2)
+                
+                pw3 = desired_config.get(rcon_meta.get("password_key", "ServerAdminPassword"))
+                if pw3: pw_candidates.append(pw3)
+                
+                pw4 = rcon_meta.get("default_password")
+                if pw4: pw_candidates.append(pw4)
+                
+                pws_to_try = []
+                for pw in pw_candidates:
+                    if pw and pw not in pws_to_try: pws_to_try.append(pw)
+                
                 cmd = rcon_meta.get("command", "CloseServer")
 
-                def build_rcon_packet(pkt_id, pkt_type, body):
-                    payload = struct.pack('<ii', pkt_id, pkt_type) + body.encode('utf-8') + b'\x00\x00'
-                    return struct.pack('<i', len(payload)) + payload
-
                 for port in ports_to_try:
-                    try:
-                        with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
-                            # Sende Auth
-                            s.sendall(build_rcon_packet(1, 3, password))
-                            
-                            resp = s.recv(4096)
-                            if len(resp) < 12: raise Exception("Incomplete auth response")
-                            resp_len, resp_id, resp_type = struct.unpack('<iii', resp[:12])
-                            
-                            # Server schickt manchmal ein leeres Response-Paket voraus
-                            if resp_type != 2:
-                                resp = s.recv(4096)
-                                if len(resp) < 12: raise Exception("Incomplete auth response 2")
-                                resp_len, resp_id, resp_type = struct.unpack('<iii', resp[:12])
+                    if graceful: break
+                    for pw in pws_to_try:
+                        try:
+                            with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
+                                resp_id, resp_type, _ = self._rcon_roundtrip(s, 1, 3, pw)
                                 
-                            if resp_type != 2 or resp_id == -1:
-                                raise Exception("RCON Auth fehlgeschlagen")
+                                if resp_type != 2:
+                                    resp_id, resp_type, _ = self._rcon_roundtrip(s, 1, 3, pw)
+                                    
+                                if resp_id is None or resp_id == -1 or resp_type != 2:
+                                    continue
+                                    
+                                self._rcon_roundtrip(s, 2, 2, "SaveWorld")
+                                time.sleep(1)
                                 
-                            logger.info(f"[*] RCON Auth auf Port {port} erfolgreich.")
-                            
-                            # Optional: Vor DoExit erst SaveWorld senden
-                            s.sendall(build_rcon_packet(2, 2, "SaveWorld"))
-                            time.sleep(2)
-                            
-                            # Sende eigentlichen Shutdown Befehl
-                            s.sendall(build_rcon_packet(3, 2, cmd))
-                            logger.info(f"[+] RCON '{cmd}' erfolgreich gesendet.")
-                            graceful = True
+                                self._rcon_roundtrip(s, 3, 2, cmd)
+                                logger.info(f"[+] RCON '{cmd}' auf Port {port} BESTÄTIGT ausgeführt.")
+                                graceful = True
+                                break
+                        except Exception as e:
                             break
-                    except Exception as e:
-                        logger.debug(f"RCON Versuch auf Port {port} fehlgeschlagen: {e}")
+                            
             except Exception as e: logger.warning(f"[!] RCON Fehler: {e}")
 
         if not graceful:
-            logger.info("[Recovery] Sende Soft-Kill...")
+            logger.info("[Recovery] Keine Kombination akzeptiert. Sende Soft-Kill...")
             for pid, p in procs.items():
                 try: p.terminate()
                 except: pass

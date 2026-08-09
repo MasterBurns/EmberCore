@@ -486,6 +486,31 @@ def get_server_manifest(plugin_id: str):
 
 IMPORT_TASKS = {}
 
+def trigger_delayed_mod_resolve(plugin_id: str):
+    import threading
+    import time
+    import asyncio
+    from core.modmeta import refresh_mod_metadata, resolve_mod_names_from_log
+    from core.env import logger
+
+    def poll_and_resolve():
+        for _ in range(30):
+            time.sleep(10)
+            names = resolve_mod_names_from_log(plugin_id)
+            if names:
+                break
+        
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(refresh_mod_metadata(plugin_id))
+            loop.close()
+        except Exception as e:
+            logger.error(f"[ModMeta] Delayed resolve error for {plugin_id}: {e}")
+
+    t = threading.Thread(target=poll_and_resolve, daemon=True)
+    t.start()
+
 def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_dir: str, server_dir: str):
     import shutil
     import os
@@ -555,21 +580,26 @@ def _run_amp_import(task_id: str, amp_path: str, mode: str, plugin_id: str, src_
             with open(os.path.join(mods_dir, "mods_db.json"), "w", encoding="utf-8") as f:
                 json.dump(mods_db, f, indent=2)
             logger.info(f"[*] {len(mods_db)} Mods aus AMP Konfiguration importiert.")
-            
-            import asyncio
-            from core.modmeta import refresh_mod_metadata
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(refresh_mod_metadata(plugin_id))
-                else:
-                    loop.run_until_complete(refresh_mod_metadata(plugin_id))
-            except Exception:
-                asyncio.run(refresh_mod_metadata(plugin_id))
-            
         if mode == "move":
             IMPORT_TASKS[task_id]["message"] = "Räume alten Ordner auf..."
             shutil.rmtree(src_dir, ignore_errors=True)
+
+        # Cleanup für ASA (Mod-Reste bereinigen)
+        if "asa" in plugin_id.lower():
+            IMPORT_TASKS[task_id]["message"] = "Bereinige Mod-Cache..."
+            asa_mods_dir = os.path.join(server_dir, "ShooterGame", "Mods")
+            if os.path.exists(asa_mods_dir):
+                for f in os.listdir(asa_mods_dir):
+                    if f.endswith(".pak"):
+                        try: os.remove(os.path.join(asa_mods_dir, f))
+                        except: pass
+            asa_mods_user = os.path.join(server_dir, "ShooterGame", "ModsUserData")
+            if os.path.exists(asa_mods_user):
+                shutil.rmtree(asa_mods_user, ignore_errors=True)
+
+        # Triggern des asynchronen Mod-Resolves im Hintergrund
+        if mod_ids:
+            trigger_delayed_mod_resolve(plugin_id)
 
         IMPORT_TASKS[task_id]["progress"] = 100
         IMPORT_TASKS[task_id]["status"] = "completed"
@@ -1017,8 +1047,7 @@ def start(plugin_id: str, background_tasks: BackgroundTasks):
         ConfigManager.enforce_cluster_rules(plugin_id, manifest)
         args.extend(cluster_info["args"])
 
-    from core.modmeta import refresh_mod_metadata
-    background_tasks.add_task(refresh_mod_metadata, plugin_id)
+    trigger_delayed_mod_resolve(plugin_id)
 
     return server_manager.start_server(plugin_id, executable_path, args)
 
@@ -1034,6 +1063,14 @@ def stats(plugin_id: str, skip_disk: bool = False):
     
     # NEU: Dem Frontend den Backup-Status mitteilen
     data["backup_progress"] = backup_manager.get_progress(plugin_id) 
+    
+    # Unified Save Data Status für das Frontend
+    if data["status"] == "online":
+        cluster_args = cluster_manager.get_injection_args(plugin_id)
+        data["unified_save_active"] = bool(cluster_args and "-usestore" in cluster_args.get("args", []))
+    else:
+        data["unified_save_active"] = False
+        
     return data
 
 @router.get("/server/logs/{plugin_id}")
@@ -1080,8 +1117,13 @@ def get_server_mods(plugin_id: str):
 @router.post("/server/mods/resolve/{plugin_id}")
 async def resolve_mods_endpoint(plugin_id: str):
     from core.modmeta import refresh_mod_metadata
-    res = await refresh_mod_metadata(plugin_id)
-    return res
+    try:
+        res = await refresh_mod_metadata(plugin_id)
+        return res
+    except Exception as e:
+        from core.env import logger
+        logger.error(f"Error resolving mods for {plugin_id}: {e}")
+        return {"status": "error", "message": f"Fehler beim Auflösen der Mods: {e}"}
 
 @router.post("/server/mods/add/{plugin_id}/{mod_id}")
 async def add_server_mod(plugin_id: str, mod_id: str):
@@ -1127,6 +1169,7 @@ async def add_server_mod(plugin_id: str, mod_id: str):
     with open(mods_file, "w", encoding="utf-8") as f: json.dump(current_mods, f, indent=2)
 
     rebuild_modlist(plugin_id, manifest)
+    trigger_delayed_mod_resolve(plugin_id)
     return {"status": "success", "message": f"Mod '{mod_name}' zur Liste hinzugefügt. Bitte klicke nun auf 'Install / Update', um sie herunterzuladen!"}
 
 class ModTransferRequest(BaseModel):

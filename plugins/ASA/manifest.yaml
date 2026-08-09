@@ -30,7 +30,7 @@ mods_meta:
 # Standard-Startparameter für ASA
 # TheIsland_WP ist die Standard-Map. Wir aktivieren direkt RCON für den sauberen EmberCore-Shutdown.
 default_args:
-  - "TheIsland_WP?listen?MultiHome=0.0.0.0?Port=7777?QueryPort=27015?RCONEnabled=True?RCONPort=27020"
+  - "TheIsland_WP?listen?MultiHome=0.0.0.0?Port=7777?QueryPort=27015?RCONEnabled=True"
   - "-server"
   - "-log"
   - "-culture=en"
@@ -75,6 +75,7 @@ shutdown:
     config_path: "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini"
     password_key: "ServerAdminPassword"
     port_key: "RCONPort"
+    grace_seconds: 120
 
 # Backup-Pfade
 backup:
@@ -87,6 +88,8 @@ config_meta:
   arg_mapping:
     SessionName: "?SessionName={value}"
     MaxPlayers: "-WinLiveMaxPlayers={value}"
+    ServerAdminPassword: "?ServerAdminPassword={value}"
+    RCONPort: "?RCONPort={value}"
   fields:
     # --- LOKALISIERUNG / REGION BUGFIX ---
     - key: "Culture"
@@ -111,7 +114,14 @@ config_meta:
     - key: "ServerAdminPassword"
       label: "Admin/RCON Passwort"
       type: "text"
+      section: "ServerSettings"
       default: "EmberCoreRcon"
+      
+    - key: "RCONPort"
+      label: "RCON Port"
+      type: "number"
+      section: "ServerSettings"
+      default: 27020
       
     - key: "MaxPlayers"
       label: "Maximale Spieler"

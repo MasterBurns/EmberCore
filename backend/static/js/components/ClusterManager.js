@@ -124,6 +124,12 @@ export default {
     </div>
     <div class="p-4 flex-1">
     <div @click="openSystemFolder(cId)" class="text-xs text-gray-500 hover:text-gray-300 mb-4 bg-black/20 p-2.5 rounded border border-gray-800/60 hover:border-blue-500/50 break-all flex items-center gap-2.5 font-mono cursor-pointer transition"><svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>{{ cluster.shared_dir }}</div>
+    <div v-if="cluster.game_name === 'ASA'" class="mb-4 bg-blue-900/20 border border-blue-800/50 rounded p-2.5 flex items-start gap-2 text-blue-400">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <div class="text-[11px] font-medium leading-tight">
+            Unified Save Data (-usestore) & Transfer-Backups: Automatisch beim nächsten Server-Start aktiviert (Schutz vor Charakter-Verlust).
+        </div>
+    </div>
     <div v-for="memberId in (cluster.members || [])" :key="memberId" class="p-3 mb-2 bg-gray-800 border border-gray-700 rounded-lg flex justify-between items-center shadow-sm">
     <div><div class="font-medium text-gray-200 text-sm">{{ getServerName(memberId) }}</div><div class="text-[11px] text-green-400 mt-1 flex items-center gap-1 font-semibold">🖥️ Im Cluster aktiv</div></div>
     <button @click="removeFromCluster(memberId)" class="text-gray-500 hover:text-red-400 transition p-1 cursor-pointer"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>

@@ -142,7 +142,32 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
             }
             return html;
         };
-        return { store, api, currentServerData, filteredGroupedConfigFields, formatLog }; 
+
+        const normalizeForCompare = (val) => {
+            if (val === null || val === undefined) return '';
+            const s = String(val).toLowerCase().trim();
+            if (s === 'true' || s === '1') return 'true';
+            if (s === 'false' || s === '0') return 'false';
+            return s;
+        };
+
+        const getConfigDirtyCount = () => {
+            if (!store.configData?.values || !store.originalConfigValues) return 0;
+            let count = 0;
+            for (const key in store.configData.values) {
+                if (normalizeForCompare(store.configData.values[key]) !== normalizeForCompare(store.originalConfigValues[key])) {
+                    count++;
+                }
+            }
+            return count;
+        };
+        
+        const discardConfigChanges = () => {
+            if (store.originalConfigValues) {
+                store.configData.values = JSON.parse(JSON.stringify(store.originalConfigValues));
+            }
+        };
+        return { store, api, currentServerData, filteredGroupedConfigFields, formatLog, getConfigDirtyCount, discardConfigChanges }; 
     },
     template: `
     <div class="max-w-5xl mx-auto space-y-6">
@@ -150,7 +175,14 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
         <div class="flex justify-between items-center bg-gray-950 p-5 rounded-xl border border-gray-900 shadow-md">
             <div>
                 <h1 class="text-2xl font-black text-white tracking-wide truncate">{{ currentServerData?.server_name || 'Lade...' }}</h1>
-                <p class="text-sm text-gray-500 font-mono mt-1">Engine: <span class="text-gray-400">{{ currentServerData?.game_name || '...' }}</span></p>
+                <div class="flex items-center gap-3 mt-1">
+                    <p class="text-sm text-gray-500 font-mono">Engine: <span class="text-gray-400">{{ currentServerData?.game_name || '...' }}</span></p>
+                    <span v-if="currentServerData?.game_name === 'ASA' && store.serverStats?.unified_save_active !== undefined" 
+                        :class="store.serverStats?.unified_save_active ? 'bg-green-900/30 text-green-400 border-green-800/50' : 'bg-gray-800/50 text-gray-500 border-gray-700'" 
+                        class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border">
+                        Unified Save: {{ store.serverStats?.unified_save_active ? 'Aktiv' : 'Inaktiv' }}
+                    </span>
+                </div>
             </div>
             <div class="flex items-center gap-3">
                 <button @click="renameServer()" class="h-10 px-5 rounded-lg font-bold transition cursor-pointer text-sm flex items-center justify-center bg-gray-900 border border-gray-800 hover:bg-gray-800 text-gray-300 hover:text-white shadow-sm">
@@ -226,17 +258,23 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
                     
                     <div v-if="['running', 'queued'].includes(store.installTasks[store.selectedPlugin]?.status)" class="bg-gray-950 border border-gray-900 p-4 rounded-xl shadow-lg mt-4">
                         <div class="flex justify-between items-center mb-2">
-                            <span class="text-sm font-bold text-blue-400 uppercase">
+                            <span class="text-sm font-bold text-blue-400 uppercase flex items-center gap-2">
                                 {{ store.installTasks[store.selectedPlugin]?.status === 'queued' ? 'In Warteschlange' : (store.installTasks[store.selectedPlugin]?.phase || 'Installation läuft') }}
+                                <span v-if="store.installTasks[store.selectedPlugin]?.stalled" class="text-[10px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded border border-red-800">⚠️ Blockiert</span>
                             </span>
                             <span class="text-xs text-gray-400 font-mono">{{ Math.round(store.installTasks[store.selectedPlugin]?.progress || 0) }}%</span>
                         </div>
-                        <div class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
+                        
+                        <div v-if="store.installTasks[store.selectedPlugin]?.status === 'running' && ((Date.now() / 1000) - (store.installTasks[store.selectedPlugin]?.last_output_at || (Date.now()/1000))) > 20" class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
+                            <div class="bg-blue-500/50 h-2.5 rounded-full w-full animate-pulse"></div>
+                        </div>
+                        <div v-else class="w-full bg-gray-800 rounded-full h-2.5 mb-3">
                             <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" :style="'width: ' + (store.installTasks[store.selectedPlugin]?.progress || 0) + '%'"></div>
                         </div>
+                        
                         <div class="flex justify-between items-center">
-                            <p class="text-xs text-gray-400 truncate pr-4">{{ store.installTasks[store.selectedPlugin]?.message }}</p>
-                            <button @click="api.cancelInstall()" class="bg-red-900/50 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer">Abbrechen</button>
+                            <p class="text-xs text-gray-400 truncate pr-4" :class="store.installTasks[store.selectedPlugin]?.stalled ? 'text-red-400 font-bold' : ''">{{ store.installTasks[store.selectedPlugin]?.message }}</p>
+                            <button @click="api.cancelInstall()" class="bg-red-900/50 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer flex-shrink-0">Abbrechen</button>
                         </div>
                     </div>
                     
@@ -357,8 +395,8 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
                                         <input v-if="field.type === 'number'" type="number" v-model.number="store.configData.values[field.key]" class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-gray-400 focus:border-orange-900 outline-none w-full font-mono">
                                     </div>
                                 </div>
+                            </div>
                         </div>
-                        <button @click="api.saveConfig()" class="w-full bg-orange-600 hover:bg-orange-500 text-white font-medium p-2.5 rounded-lg transition shadow-md mt-4 cursor-pointer text-sm">💾 Einstellungen speichern</button>
                     </template>
                     <template v-else>
                         <p class="text-gray-500 text-sm text-center py-6">Dieses Profil besitzt keine editierbaren Web-Konfigurationen.</p>
@@ -374,6 +412,25 @@ ${data.transferred} Mods übertragen auf ${data.targets.length} Server.`, 'Erfol
                             <option v-for="map in store.startupData.available_maps || []" :key="map" :value="map">{{ map }}</option>
                         </select>
                         <p class="text-[10px] text-gray-500 mt-2">Änderungen werden erst nach einem Server-Neustart aktiv. Savegames sind oft kartenspezifisch!</p>
+                    </div>
+
+                    <div v-if="store.configData?.enabled || store.startupData?.enabled" class="sticky bottom-0 z-50 bg-gray-950/90 backdrop-blur-md border-t border-gray-800 p-4 mt-8 -mx-5 -mb-5 rounded-b-xl flex items-center justify-between shadow-[0_-10px_20px_rgba(0,0,0,0.3)]">
+                        <div class="flex items-center gap-3">
+                            <span v-if="getConfigDirtyCount() > 0" class="text-xs font-bold text-orange-500 bg-orange-950/50 px-3 py-1.5 rounded-full border border-orange-900/50">
+                                {{ getConfigDirtyCount() }} ungespeicherte Änderung{{ getConfigDirtyCount() > 1 ? 'en' : '' }}
+                            </span>
+                            <span v-else class="text-xs text-gray-500 font-bold px-3 py-1.5">
+                                Alle Änderungen gespeichert
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button v-if="getConfigDirtyCount() > 0" @click="discardConfigChanges()" class="bg-gray-800 hover:bg-gray-700 text-white font-medium px-4 py-2 rounded-lg transition shadow-md cursor-pointer text-sm">
+                                ❌ Verwerfen
+                            </button>
+                            <button @click="api.saveConfig()" :class="getConfigDirtyCount() > 0 ? 'bg-orange-600 hover:bg-orange-500 shadow-[0_0_15px_rgba(234,88,12,0.4)]' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'" class="text-white font-medium px-6 py-2 rounded-lg transition cursor-pointer text-sm font-bold">
+                                💾 Speichern
+                            </button>
+                        </div>
                     </div>
                 </div>
 

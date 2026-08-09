@@ -270,7 +270,10 @@ class ClusterManager:
                     "args": [
                         f"-clusterid={cluster_id}",
                         f"-ClusterDirOverride=\"{shared_dir}\"",
-                        "-NoTransferFromFiltering"
+                        "-NoTransferFromFiltering",
+                        "-usestore",
+                        "-BackupTransferPlayerDatas",
+                        "-converttostore"
                     ]
                 }
         return None

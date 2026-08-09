@@ -34,7 +34,10 @@ export default {
     <div v-for="(instances, gameName) in categorizedPlugins" :key="gameName" class="space-y-1">
     <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest px-2 mb-2">{{ gameName }}</h3>
     <button v-for="plugin in instances" :key="plugin.id" @click="api.selectServer(plugin.id)" :class="store.selectedPlugin === plugin.id && store.currentView === 'server' ? 'bg-gray-900 border-orange-500 text-orange-400 font-semibold' : 'border-transparent hover:bg-gray-900/50 text-gray-400'" class="w-full text-left p-2.5 rounded-lg border text-sm transition flex justify-between items-center cursor-pointer">
-    <span class="truncate pr-2">🖥️ {{ plugin.server_name }}</span>
+    <span class="truncate pr-2 flex items-center gap-2">
+        <span>🖥️ {{ plugin.server_name }}</span>
+        <span v-if="store.pollErrors && store.pollErrors[plugin.id] > 0" class="text-[10px] bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded flex items-center" title="Verbindung gestört">⚠️ {{store.pollErrors[plugin.id]}}</span>
+    </span>
     <span :class="plugin.status === 'online' ? 'bg-green-500 shadow-green-500/50' : 'bg-red-500 shadow-red-500/50'" class="h-2 w-2 rounded-full shadow-sm flex-shrink-0"></span>
     </button>
     </div>
