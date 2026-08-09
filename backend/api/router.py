@@ -45,7 +45,9 @@ def _do_calculate_disk_trend(plugin_id: str):
                 for dirpath, _, fnames in os.walk(path):
                     for f in fnames:
                         fp = os.path.join(dirpath, f)
-                        if not os.path.islink(fp): total += os.path.getsize(fp)
+                        try:
+                            if not os.path.islink(fp): total += os.path.getsize(fp)
+                        except: pass
             return round(total / (1024 * 1024), 2)
 
         server_dir = os.path.join(SERVERS_ROOT, plugin_id)

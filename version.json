@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.24",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "BUGFIX: Echtzeit-Metriken (CPU, RAM, Festplatte) behoben. Verhindert Abstürze des Metriken-Threads, wenn Server-Dateien (z.B. game.db) gesperrt sind oder flüchtige Unterprozesse während der Messung sterben. Alle Werte werden nun wieder zuverlässig im UI angezeigt."
+  ]
+  },
+  {
   "version": "v0.2.0.23",
   "build_date": "2026-08-09",
   "changelog": [

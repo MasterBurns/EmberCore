@@ -443,10 +443,17 @@ class ServerManager:
 
                     if valid_procs:
                         time.sleep(0.1)
-                        total_cpu = sum((p.cpu_percent(interval=None) / psutil.cpu_count()) for p in valid_procs)
+                        total_cpu = 0
+                        cpu_count = psutil.cpu_count() or 1
+                        for p in valid_procs:
+                            try:
+                                total_cpu += p.cpu_percent(interval=None) / cpu_count
+                            except: pass
+                        
                         data["ram_mb"] = round(total_ram / (1024 * 1024), 2)
                         data["cpu_percent"] = round(total_cpu, 1)
-            except: pass
+            except Exception as e: 
+                logger.error(f"[Stats] Error calculating stats for {plugin_id}: {e}")
         return data
 
 # Instanzieren und exportieren
