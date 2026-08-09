@@ -1,7 +1,16 @@
-import os, yaml, json, re, httpx
+import os, yaml, json, re, httpx, time
 from core.env import DEV_PLUGINS_ROOT, PLUGINS_ROOT, SERVERS_ROOT, DATA_ROOT, BASE_DIR, BACKUPS_ROOT, logger
 
+_manifest_cache = {}
+
 class ConfigManager:
+    @staticmethod
+    def invalidate_manifest_cache(plugin_id=None):
+        if plugin_id:
+            if plugin_id in _manifest_cache:
+                del _manifest_cache[plugin_id]
+        else:
+            _manifest_cache.clear()
     @staticmethod
     def rename_plugin(old_id: str, new_id: str) -> dict:
         import shutil
@@ -140,9 +149,20 @@ class ConfigManager:
 
     @staticmethod
     def load_manifest(plugin_id: str):
+        now = time.time()
+        if plugin_id in _manifest_cache:
+            cached_data, timestamp = _manifest_cache[plugin_id]
+            if now - timestamp < 5.0:
+                import copy
+                return copy.deepcopy(cached_data)
+
         dev_path, _, is_dev = ConfigManager.get_plugin_paths(plugin_id)
         if is_dev:
-            with open(dev_path, "r", encoding="utf-8") as f: return yaml.safe_load(f)
+            with open(dev_path, "r", encoding="utf-8") as f: 
+                res = yaml.safe_load(f)
+                _manifest_cache[plugin_id] = (res, now)
+                import copy
+                return copy.deepcopy(res)
 
         live_path = os.path.join(PLUGINS_ROOT, plugin_id, "manifest.yaml")
         if not os.path.exists(live_path): return None
@@ -198,7 +218,9 @@ class ConfigManager:
             except Exception as e:
                 logger.error(f"[ConfigManager] Fehler beim Laden von network_override.json: {e}")
 
-        return local_manifest
+        _manifest_cache[plugin_id] = (local_manifest, time.time())
+        import copy
+        return copy.deepcopy(local_manifest)
 
     @staticmethod
     def parse_live_config(file_path: str, format: str = "ini") -> dict:

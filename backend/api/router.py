@@ -34,48 +34,65 @@ class DiscordSetupPayload(BaseModel):
 # ==========================================
 # HILFSFUNKTIONEN (Helper)
 # ==========================================
+disk_cache_calculating = set()
+
+def _do_calculate_disk_trend(plugin_id: str):
+    try:
+        now = datetime.now()
+        def get_dir_size_mb(path):
+            total = 0
+            if os.path.exists(path):
+                for dirpath, _, fnames in os.walk(path):
+                    for f in fnames:
+                        fp = os.path.join(dirpath, f)
+                        if not os.path.islink(fp): total += os.path.getsize(fp)
+            return round(total / (1024 * 1024), 2)
+
+        server_dir = os.path.join(SERVERS_ROOT, plugin_id)
+        backup_dir = os.path.join(BACKUPS_ROOT, plugin_id)
+        total_mb = get_dir_size_mb(server_dir) + get_dir_size_mb(backup_dir)
+
+        trend_file = os.path.join(DATA_ROOT, plugin_id, "storage_trend.json")
+        os.makedirs(os.path.dirname(trend_file), exist_ok=True)
+        trend_data = {}
+        if os.path.exists(trend_file):
+            try:
+                with open(trend_file, "r") as f: trend_data = json.load(f)
+            except: pass
+
+        trend_data[str(date.today())] = total_mb
+        sorted_dates = sorted(trend_data.keys())
+        if len(sorted_dates) > 7: del trend_data[sorted_dates[0]]
+        with open(trend_file, "w") as f: json.dump(trend_data, f)
+
+        trend_mb_per_day = 0
+        if len(sorted_dates) > 1:
+            old, new = trend_data[sorted_dates[0]], trend_data[sorted_dates[-1]]
+            days = (datetime.strptime(sorted_dates[-1], "%Y-%m-%d") - datetime.strptime(sorted_dates[0], "%Y-%m-%d")).days
+            if days > 0: trend_mb_per_day = round((new - old) / days, 2)
+
+        _, _, free_disk = shutil.disk_usage(EXE_DIR)
+        res = {"server_mb": get_dir_size_mb(server_dir), "backup_mb": get_dir_size_mb(backup_dir), "total_plugin_mb": total_mb, "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)}
+        disk_cache[plugin_id] = (res, now)
+    finally:
+        disk_cache_calculating.discard(plugin_id)
+
 def calculate_disk_trend(plugin_id: str):
     now = datetime.now()
     if plugin_id in disk_cache:
         cached_data, last_check = disk_cache[plugin_id]
-        if (now - last_check).total_seconds() < 60: return cached_data
+        if (now - last_check).total_seconds() < 60: 
+            return cached_data
+        else:
+            if plugin_id not in disk_cache_calculating:
+                disk_cache_calculating.add(plugin_id)
+                threading.Thread(target=_do_calculate_disk_trend, args=(plugin_id,), daemon=True).start()
+            return cached_data
 
-    def get_dir_size_mb(path):
-        total = 0
-        if os.path.exists(path):
-            for dirpath, _, fnames in os.walk(path):
-                for f in fnames:
-                    fp = os.path.join(dirpath, f)
-                    if not os.path.islink(fp): total += os.path.getsize(fp)
-        return round(total / (1024 * 1024), 2)
-
-    server_dir = os.path.join(SERVERS_ROOT, plugin_id)
-    backup_dir = os.path.join(BACKUPS_ROOT, plugin_id)
-    total_mb = get_dir_size_mb(server_dir) + get_dir_size_mb(backup_dir)
-
-    trend_file = os.path.join(DATA_ROOT, plugin_id, "storage_trend.json")
-    os.makedirs(os.path.dirname(trend_file), exist_ok=True)
-    trend_data = {}
-    if os.path.exists(trend_file):
-        try:
-            with open(trend_file, "r") as f: trend_data = json.load(f)
-        except: pass
-
-    trend_data[str(date.today())] = total_mb
-    sorted_dates = sorted(trend_data.keys())
-    if len(sorted_dates) > 7: del trend_data[sorted_dates[0]]
-    with open(trend_file, "w") as f: json.dump(trend_data, f)
-
-    trend_mb_per_day = 0
-    if len(sorted_dates) > 1:
-        old, new = trend_data[sorted_dates[0]], trend_data[sorted_dates[-1]]
-        days = (datetime.strptime(sorted_dates[-1], "%Y-%m-%d") - datetime.strptime(sorted_dates[0], "%Y-%m-%d")).days
-        if days > 0: trend_mb_per_day = round((new - old) / days, 2)
-
-    _, _, free_disk = shutil.disk_usage(EXE_DIR)
-    res = {"server_mb": get_dir_size_mb(server_dir), "backup_mb": get_dir_size_mb(backup_dir), "total_plugin_mb": total_mb, "trend_mb_per_day": trend_mb_per_day, "host_free_gb": round(free_disk / (1024**3), 2)}
-    disk_cache[plugin_id] = (res, now)
-    return res
+    if plugin_id not in disk_cache_calculating:
+        disk_cache_calculating.add(plugin_id)
+        threading.Thread(target=_do_calculate_disk_trend, args=(plugin_id,), daemon=True).start()
+    return {"server_mb": 0, "backup_mb": 0, "total_plugin_mb": 0, "trend_mb_per_day": 0, "host_free_gb": 0, "calculating": True}
 
 def rebuild_modlist(plugin_id: str, manifest: dict):
     mods_meta = manifest.get("mods_meta", {})
@@ -224,6 +241,121 @@ def sync_cluster_config(cluster_id: str, payload: dict = Body(...)):
         payload.get("selected_sections", [])
     )
 
+# ==========================================
+# CLUSTER HEALTH CHECK
+# ==========================================
+def do_check_cluster_health(cluster_id: str):
+    db = cluster_manager.get_all()
+    if cluster_id not in db: return {"status": "error", "message": "Cluster nicht gefunden."}
+    
+    cluster_members = db[cluster_id].get("members", [])
+    if not cluster_members: return {"verdict": "Unhealthy", "issues": ["Cluster hat keine Member."], "members": {}}
+    
+    effective_dir = cluster_manager.get_effective_cluster_dir(cluster_id)
+    dir_exists = False
+    write_test = False
+    data_file_count = 0
+    last_write_timestamp = 0
+    
+    if effective_dir and os.path.exists(effective_dir):
+        dir_exists = True
+        try:
+            test_file = os.path.join(effective_dir, "embercore_write_test.tmp")
+            with open(test_file, "w") as f: f.write("test")
+            os.remove(test_file)
+            write_test = True
+        except: pass
+        
+        try:
+            for f in os.listdir(effective_dir):
+                if f.endswith(".arkprofile") or f.endswith(".arktribe") or f.endswith(".arkcharactersetting"):
+                    data_file_count += 1
+                    mtime = os.path.getmtime(os.path.join(effective_dir, f))
+                    if mtime > last_write_timestamp: last_write_timestamp = mtime
+        except: pass
+
+    def get_running_cmdline(p_id):
+        if p_id in server_manager.processes:
+            proc = server_manager.processes[p_id]
+            import subprocess
+            if isinstance(proc, subprocess.Popen) and hasattr(proc, 'args'):
+                return proc.args
+        procs = server_manager.get_server_processes(p_id)
+        if procs:
+            for p in procs.values():
+                try:
+                    cmd = p.cmdline()
+                    if cmd: return cmd
+                except: pass
+        return []
+
+    member_results = {}
+    issues = []
+    
+    if not effective_dir: issues.append("Effektives Cluster-Verzeichnis konnte nicht ermittelt werden.")
+    elif not dir_exists: issues.append("Cluster-Verzeichnis existiert (noch) nicht auf der Festplatte.")
+    elif not write_test: issues.append("EmberCore hat keine Schreibrechte im Cluster-Verzeichnis.")
+    elif data_file_count == 0: issues.append("Cluster-Verzeichnis ist leer (noch keine Charaktere gespeichert).")
+
+    for p_id in cluster_members:
+        info = cluster_manager.get_injection_args(p_id)
+        c_id_injected = info["cluster_id"] if info else None
+        
+        if c_id_injected != cluster_id:
+            issues.append(f"Server {p_id} hat eine abweichende Cluster-ID ({c_id_injected}).")
+            
+        cmdline = get_running_cmdline(p_id)
+        if not cmdline and info: cmdline = info["args"]
+        cmd_str = " ".join([str(x) for x in cmdline]).lower()
+        
+        has_usestore = "-usestore" in cmd_str
+        has_convert = "-converttostore" in cmd_str
+        has_backup = "-backuptransferplayerdatas" in cmd_str
+        
+        if not has_usestore: issues.append(f"Server {p_id} läuft ohne -usestore Flag.")
+        
+        # INI Check
+        ini_path = os.path.join(SERVERS_ROOT, p_id, "ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini")
+        ini_data = ConfigManager.parse_live_config(ini_path, "ini")
+        prev_dl = str(ini_data.get("PreventDownloadSurvivors", "false")).lower() in ["true", "1"]
+        prev_up = str(ini_data.get("PreventUploadSurvivors", "false")).lower() in ["true", "1"]
+        no_trib = str(ini_data.get("NoTributeDownloads", "false")).lower() in ["true", "1"]
+        
+        ini_ok = not prev_dl and not prev_up and not no_trib
+        if not ini_ok: issues.append(f"Server {p_id} blockiert Transfers in der GameUserSettings.ini.")
+
+        member_results[p_id] = {
+            "cluster_id_injected": c_id_injected,
+            "override_path": info["shared_dir"] if info else None,
+            "effective_dir": effective_dir,
+            "dir_exists": dir_exists,
+            "write_test": write_test,
+            "data_file_count": data_file_count,
+            "last_write_timestamp": last_write_timestamp,
+            "flags": {
+                "usestore": has_usestore,
+                "converttostore": has_convert,
+                "backup_transfer": has_backup
+            },
+            "ini_ok": ini_ok,
+            "online": server_manager.is_server_online(p_id)
+        }
+
+    verdict = "Healthy" if not issues else "Unhealthy"
+    return {"verdict": verdict, "issues": issues, "members": member_results}
+
+@router.get("/clusters/health/{cluster_id}")
+def get_cluster_health_api(cluster_id: str):
+    return do_check_cluster_health(cluster_id)
+
+@router.post("/clusters/enforce/{plugin_id}")
+def enforce_cluster_flags_api(plugin_id: str):
+    manifest = ConfigManager.load_manifest(plugin_id)
+    if manifest:
+        ConfigManager.enforce_cluster_rules(plugin_id, manifest)
+        ConfigManager.invalidate_manifest_cache(plugin_id)
+        return {"status": "success", "message": f"Cluster-Regeln für {plugin_id} erzwungen."}
+    return {"status": "error", "message": "Manifest nicht gefunden."}
 
 # ==========================================
 # SYSTEM & SERVICE ROUTEN
@@ -383,6 +515,10 @@ def get_installed_plugins():
     dirs_to_scan = [(DEV_PLUGINS_ROOT, True), (PLUGINS_ROOT, False)]
     installed = []
     seen_ids = set()
+    
+    # NEW: Fetch online status for all plugins at once using the snapshot
+    online_ids = server_manager.get_online_plugin_ids()
+    
     for target_dir, is_dev in dirs_to_scan:
         if not os.path.exists(target_dir): continue
         for plugin_id in os.listdir(target_dir):
@@ -407,7 +543,7 @@ def get_installed_plugins():
                         if hostname_key and live_values.get(hostname_key):
                             server_name = live_values.get(hostname_key)
 
-                    status = "online" if server_manager.is_server_online(plugin_id) else "offline"
+                    status = "online" if plugin_id in online_ids else "offline"
                     display_name = f"{server_name} [DEV]" if is_dev else server_name
                     installed.append({"id": plugin_id, "game_name": game_name, "server_name": display_name, "status": status, "is_dev": is_dev})
                     seen_ids.add(plugin_id)
@@ -459,6 +595,9 @@ async def rename_server(plugin_id: str, payload: RenamePayload):
         if plugin_id in disk_cache:
             disk_cache[new_id] = disk_cache[plugin_id]
             del disk_cache[plugin_id]
+            
+        ConfigManager.invalidate_manifest_cache(plugin_id)
+        ConfigManager.invalidate_manifest_cache(new_id)
             
         # Update Firewall Rules
         import platform
@@ -858,6 +997,9 @@ async def subscribe_plugin(plugin_id: str, url: str, server_name: str = "My Serv
                 with open(os.path.join(desired_dir, "desired_config.json"), "w", encoding="utf-8") as df:
                     json.dump(initial_desired, df, indent=2)
 
+        ConfigManager.invalidate_manifest_cache(instance_id)
+        ConfigManager.apply_desired_config(instance_id)
+
         return {"status": "success", "message": f"Server '{server_name}' erstellt.", "instance_id": instance_id}
     except Exception as e:
         if os.path.exists(instance_dir): shutil.rmtree(instance_dir)
@@ -1046,6 +1188,16 @@ def start(plugin_id: str, background_tasks: BackgroundTasks):
         logger.info(f"[*] Server ist Teil von Cluster '{cluster_info['cluster_id']}'. Führe Pre-Flight Check aus...")
         ConfigManager.enforce_cluster_rules(plugin_id, manifest)
         args.extend(cluster_info["args"])
+        
+        # Health Check auto-log
+        try:
+            health = do_check_cluster_health(cluster_info['cluster_id'])
+            if health.get("verdict") == "Unhealthy":
+                logger.warning(f"[Cluster Health] Warnung: Cluster '{cluster_info['cluster_id']}' hat Probleme: {', '.join(health.get('issues', []))}")
+            else:
+                logger.info(f"[Cluster Health] Cluster '{cluster_info['cluster_id']}' ist gesund (Unified Save Data aktiv).")
+        except Exception as e:
+            logger.error(f"[Cluster Health] Auto-Check fehlgeschlagen: {e}")
 
     trigger_delayed_mod_resolve(plugin_id)
 

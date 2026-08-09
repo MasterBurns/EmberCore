@@ -91,6 +91,79 @@ export default {
     <div class="flex justify-end gap-3 pt-2 shrink-0"><button @click="closeModSyncModal" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg transition">Abbrechen</button><button @click="submitModSync" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium rounded-lg transition" :disabled="isSyncing">Apply</button></div>
     </div>
     </div>
+    <div v-if="showHealthModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-[9999] p-4 transition-all animate-fadeIn">
+    <div class="bg-[#111827] border border-gray-800 rounded-xl max-w-4xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+    <div class="flex justify-between items-start shrink-0">
+        <h3 class="text-xl font-bold text-white flex items-center gap-2">
+            <svg class="w-6 h-6" :class="healthData?.verdict === 'Healthy' ? 'text-green-500' : 'text-red-500'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Cluster Health: {{ activeHealthClusterName }}
+        </h3>
+        <button @click="refreshHealth" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center gap-2 transition" :disabled="isHealthLoading">
+            <svg class="w-3.5 h-3.5" :class="{'animate-spin': isHealthLoading}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            Jetzt prüfen
+        </button>
+    </div>
+    
+    <div v-if="isHealthLoading && !healthData" class="flex-1 flex items-center justify-center py-10"><div class="text-gray-400 animate-pulse">Analysiere Cluster...</div></div>
+    
+    <div v-if="healthData" class="flex-1 overflow-y-auto min-h-0 space-y-4 pr-2">
+        <!-- Issues Liste -->
+        <div v-if="healthData.issues && healthData.issues.length > 0" class="bg-red-950/30 border border-red-900/50 rounded-lg p-3 space-y-1.5">
+            <h4 class="text-sm font-bold text-red-400 flex items-center gap-2 mb-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>Gefundene Probleme</h4>
+            <div v-for="(issue, idx) in healthData.issues" :key="idx" class="text-xs text-red-300 flex items-start gap-2">
+                <span class="text-red-500 font-bold mt-0.5">•</span> <span>{{ issue }}</span>
+            </div>
+        </div>
+        <div v-else class="bg-green-950/30 border border-green-900/50 rounded-lg p-3">
+            <h4 class="text-sm font-bold text-green-400 flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Cluster ist fehlerfrei konfiguriert</h4>
+        </div>
+        
+        <!-- Member Table -->
+        <div class="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">
+            <table class="w-full text-left text-xs text-gray-300">
+                <thead class="bg-gray-900/80 text-gray-400 uppercase font-bold text-[10px] tracking-wider border-b border-gray-800">
+                    <tr>
+                        <th class="px-3 py-2">Server</th>
+                        <th class="px-3 py-2 text-center">Cluster-ID</th>
+                        <th class="px-3 py-2 text-center">Ordner & Schreibrechte</th>
+                        <th class="px-3 py-2 text-center">Unified Save Flags</th>
+                        <th class="px-3 py-2 text-center">INI Transfers offen</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800">
+                    <tr v-for="(member, mId) in healthData.members" :key="mId" class="hover:bg-gray-900/30 transition">
+                        <td class="px-3 py-2">
+                            <div class="font-bold text-gray-200">{{ getServerName(mId) }}</div>
+                            <div class="text-[10px] text-gray-500 font-mono">{{ mId }}</div>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <span :class="member.cluster_id_injected === activeHealthClusterId ? 'bg-green-900/50 text-green-400 border-green-700' : 'bg-red-900/50 text-red-400 border-red-700'" class="px-2 py-0.5 rounded border font-mono text-[10px]">{{ member.cluster_id_injected || 'Fehlt' }}</span>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <div class="flex flex-col items-center gap-1">
+                                <span :class="member.dir_exists && member.write_test ? 'bg-green-900/50 text-green-400 border-green-700' : 'bg-red-900/50 text-red-400 border-red-700'" class="px-2 py-0.5 rounded border text-[10px]">{{ member.dir_exists && member.write_test ? 'OK' : 'Fehler' }}</span>
+                                <span class="text-[9px] text-gray-500 font-mono" v-if="member.dir_exists" title="Charakter-Daten im Cluster">{{ member.data_file_count }} Dateien</span>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <span :class="member.flags.usestore && member.flags.converttostore && member.flags.backup_transfer ? 'bg-green-900/50 text-green-400 border-green-700' : 'bg-red-900/50 text-red-400 border-red-700'" class="px-2 py-0.5 rounded border text-[10px]">
+                                {{ member.flags.usestore && member.flags.converttostore && member.flags.backup_transfer ? 'Korrekt' : 'Fehlerhaft' }}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2 text-center">
+                            <span :class="member.ini_ok ? 'bg-green-900/50 text-green-400 border-green-700' : 'bg-red-900/50 text-red-400 border-red-700'" class="px-2 py-0.5 rounded border text-[10px]">{{ member.ini_ok ? 'Offen' : 'Blockiert' }}</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="flex justify-between gap-3 pt-2 shrink-0 border-t border-gray-800">
+        <button @click="enforceTransferFlags" class="px-4 py-2 bg-gray-800 hover:bg-orange-600 text-gray-300 hover:text-white border border-gray-700 rounded text-xs font-bold transition shadow-sm" :disabled="isHealthLoading">Transfer-Flags enforce</button>
+        <button @click="closeHealthModal" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg transition">Schließen</button>
+    </div>
+    </div>
+    </div>
 
     <div class="flex justify-between items-center mb-6">
     <h2 class="text-2xl font-bold text-white flex items-center gap-2"><svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>Cluster Verwaltung</h2>
@@ -124,11 +197,12 @@ export default {
     </div>
     <div class="p-4 flex-1">
     <div @click="openSystemFolder(cId)" class="text-xs text-gray-500 hover:text-gray-300 mb-4 bg-black/20 p-2.5 rounded border border-gray-800/60 hover:border-blue-500/50 break-all flex items-center gap-2.5 font-mono cursor-pointer transition"><svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>{{ cluster.shared_dir }}</div>
-    <div v-if="cluster.game_name === 'ASA'" class="mb-4 bg-blue-900/20 border border-blue-800/50 rounded p-2.5 flex items-start gap-2 text-blue-400">
-        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-        <div class="text-[11px] font-medium leading-tight">
-            Unified Save Data (-usestore) & Transfer-Backups: Automatisch beim nächsten Server-Start aktiviert (Schutz vor Charakter-Verlust).
+    <div v-if="cluster.game_name === 'ASA'" class="mb-4 bg-blue-900/20 border border-blue-800/50 rounded p-2.5 flex flex-col gap-2">
+        <div class="flex items-start gap-2 text-blue-400">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div class="text-[11px] font-medium leading-tight">Unified Save Data (-usestore) & Transfer-Backups: Automatisch beim nächsten Server-Start aktiviert (Schutz vor Charakter-Verlust).</div>
         </div>
+        <button @click="openHealthModal(cId, cluster.name)" class="self-start px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 rounded text-[10px] font-bold transition">Cluster Health Diagnose</button>
     </div>
     <div v-for="memberId in (cluster.members || [])" :key="memberId" class="p-3 mb-2 bg-gray-800 border border-gray-700 rounded-lg flex justify-between items-center shadow-sm">
     <div><div class="font-medium text-gray-200 text-sm">{{ getServerName(memberId) }}</div><div class="text-[11px] text-green-400 mt-1 flex items-center gap-1 font-semibold">🖥️ Im Cluster aktiv</div></div>
@@ -152,7 +226,10 @@ export default {
             showConfigSyncModal: false, activeConfigClusterId: null, masterConfigPluginId: '', isConfigSyncing: false,
             syncMode: 'simple', // 'simple' oder 'advanced'
             availableSections: [],
-            selectedSections: []
+            selectedSections: [],
+            
+            // HEALTH STATE
+            showHealthModal: false, activeHealthClusterId: null, activeHealthClusterName: '', healthData: null, isHealthLoading: false
         }
     },
     computed: {

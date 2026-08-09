@@ -159,7 +159,21 @@ export const api = {
             } else { await this.alert(data.message, "Update Fehler"); store.isSystemUpdating = false; }
         } catch (e) { await this.alert("Update-Server nicht erreichbar.", "Netzwerk Fehler"); store.isSystemUpdating = false; }
     },
-    async loadInstalledPlugins() { const res = await fetch('/api/plugins/installed'); if (res.ok) { store.installedPlugins = await res.json(); if (store.selectedPlugin && !store.installedPlugins.find(p => p.id === store.selectedPlugin)) this.openMarketplace(); } },
+    async loadInstalledPlugins() { 
+        try {
+            const cached = localStorage.getItem('embercore_plugins');
+            if (cached) {
+                store.installedPlugins = JSON.parse(cached);
+                if (store.installedPlugins.length === 0) store.currentView = 'system_status';
+            }
+        } catch(e) {}
+        
+        return fetch('/api/plugins/installed').then(res => res.json()).then(data => {
+            store.installedPlugins = data;
+            localStorage.setItem('embercore_plugins', JSON.stringify(data));
+            if (store.selectedPlugin && !store.installedPlugins.find(p => p.id === store.selectedPlugin)) this.openMarketplace(); 
+        }).catch(() => {});
+    },
     async fetchStats() {
         if (store.currentView === 'system_status') this.fetchServiceStatus();
         if (!store.selectedPlugin || store.currentView !== 'server') return;
@@ -217,6 +231,11 @@ export const api = {
         store.configData = { enabled: false, fields: [], unknown_fields: [], values: {} };
         store.originalConfigValues = null;
         store.startupData = { enabled: false, selected_map: '', show_external_console: false, show_in_discord: true };
+        
+        // UI-Latenz Eliminieren: Sofortiger Stats-Fetch ohne Disk
+        fetch(`/api/server/stats/${id}?skip_disk=true`).then(res => res.json()).then(data => {
+            if (store.selectedPlugin === id) store.serverStats = data;
+        }).catch(() => {});
         
         const currentPlugin = store.selectedPlugin;
         // Map sofort laden

@@ -40,6 +40,70 @@ class ServerManager:
     def __init__(self):
         self.processes = {}
         self.logs = {}
+        self._last_snapshot = None
+        self._last_snapshot_time = 0
+        self._known_exes = set()
+        self._known_exes_time = 0
+
+    def _get_known_exes(self):
+        now = time.time()
+        if now - self._known_exes_time < 10:
+            return self._known_exes
+            
+        exes = set()
+        try:
+            from core.env import PLUGINS_ROOT, DEV_PLUGINS_ROOT
+            for target_dir in [PLUGINS_ROOT, DEV_PLUGINS_ROOT]:
+                if not os.path.exists(target_dir): continue
+                for plugin_id in os.listdir(target_dir):
+                    manifest = ConfigManager.load_manifest(plugin_id)
+                    if manifest:
+                        exe_win = manifest.get("executable_windows")
+                        if exe_win: exes.add(os.path.basename(exe_win).lower())
+                        exe_lin = manifest.get("executable_linux")
+                        if exe_lin: exes.add(os.path.basename(exe_lin).lower())
+            self._known_exes = exes
+            self._known_exes_time = now
+        except Exception as e:
+            logger.error(f"Fehler beim Laden bekannter Exes: {e}")
+        return self._known_exes
+
+    def _system_snapshot(self):
+        now = time.time()
+        if self._last_snapshot and (now - self._last_snapshot_time) < 3.0:
+            return self._last_snapshot
+            
+        logger.info("[*] Erstelle System-Snapshot (psutil)")
+        
+        connections = []
+        try: connections = psutil.net_connections(kind='all')
+        except: pass
+        
+        processes = []
+        try:
+            processes = list(psutil.process_iter(['pid', 'name']))
+        except: pass
+        
+        self._last_snapshot = (connections, processes)
+        self._last_snapshot_time = now
+        return self._last_snapshot
+
+    def get_online_plugin_ids(self) -> set:
+        now = time.time()
+        if hasattr(self, '_last_online_ids_time') and (now - self._last_online_ids_time) < 3.0:
+            return getattr(self, '_last_online_ids')
+            
+        online_ids = set()
+        from core.env import PLUGINS_ROOT, DEV_PLUGINS_ROOT
+        for target_dir in [PLUGINS_ROOT, DEV_PLUGINS_ROOT]:
+            if not os.path.exists(target_dir): continue
+            for plugin_id in os.listdir(target_dir):
+                if self.is_server_online(plugin_id):
+                    online_ids.add(plugin_id)
+                    
+        setattr(self, '_last_online_ids', online_ids)
+        setattr(self, '_last_online_ids_time', now)
+        return online_ids
 
     def _read_output(self, plugin_id, process):
         self.logs[plugin_id] = deque(maxlen=200)
@@ -64,33 +128,28 @@ class ServerManager:
                 for p_info in manifest["network_meta"]["ports"]:
                     if "port" in p_info: target_ports.append(int(p_info["port"]))
 
+            connections, processes = self._system_snapshot()
+            known_exes = self._get_known_exes()
+
             if target_ports:
                 try:
-                    for conn in psutil.net_connections(kind='all'):
+                    for conn in connections:
                         if conn.laddr and conn.laddr.port in target_ports and conn.pid:
                             if conn.pid not in target_procs:
                                 try:
                                     proc = psutil.Process(conn.pid)
                                     p_name_check = str(proc.name() or '').lower()
                                     if p_name_check not in ["steamcmd.exe", "embercore.exe", "python.exe"]:
-                                        server_dir_clean = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
-                                        server_dir_clean = server_dir_clean if server_dir_clean.endswith(os.sep) else server_dir_clean + os.sep
                                         matched = False
                                         try:
                                             exe = proc.exe()
-                                            if exe:
-                                                exe_path = os.path.normcase(os.path.realpath(exe))
-                                                if exe_path.startswith(server_dir_clean): matched = True
+                                            if exe and os.path.normcase(os.path.realpath(exe)).startswith(server_dir_clean): matched = True
                                         except: pass
                                         if not matched:
                                             try:
                                                 cwd = proc.cwd()
-                                                if cwd:
-                                                    cwd_path = os.path.normcase(os.path.realpath(cwd))
-                                                    cwd_path = cwd_path if cwd_path.endswith(os.sep) else cwd_path + os.sep
-                                                    if cwd_path.startswith(server_dir_clean): matched = True
+                                                if cwd and os.path.normcase(os.path.realpath(cwd)).startswith(server_dir_clean): matched = True
                                             except: pass
-                                        
                                         if matched:
                                             target_procs[proc.pid] = proc
                                 except: pass
@@ -103,20 +162,29 @@ class ServerManager:
                         target_procs[parent_proc.pid] = parent_proc
                 except psutil.NoSuchProcess: del self.processes[plugin_id]
 
-            for p in psutil.process_iter(['pid', 'exe', 'cwd', 'name', 'cmdline']):
-                if p.info['pid'] in target_procs: continue
+            for p in processes:
+                pid = p.info['pid']
+                if pid in target_procs: continue
                 try:
                     p_name = str(p.info.get('name') or '').lower()
+                    
+                    if known_exes and p_name not in known_exes:
+                        continue
+                        
                     if p_name in ["embercore.exe", "python.exe", "cmd.exe", "conhost.exe", "embercoreservice.exe", "winsw-x64.exe", "explorer.exe", "svchost.exe", "system idle process", "steamcmd.exe", "steamerrorreporter.exe", "steamerrorreporter64.exe"]:
                         continue
 
                     matched = False
-                    exe = p.info.get('exe')
-                    cwd = p.info.get('cwd')
-                    cmdline = p.info.get('cmdline')
-
-                    server_dir_clean = os.path.normcase(os.path.realpath(os.path.join(SERVERS_ROOT, plugin_id)))
-                    server_dir_clean = server_dir_clean if server_dir_clean.endswith(os.sep) else server_dir_clean + os.sep
+                    proc = psutil.Process(pid)
+                    exe = ""
+                    try: exe = proc.exe()
+                    except: pass
+                    cwd = ""
+                    try: cwd = proc.cwd()
+                    except: pass
+                    cmdline = []
+                    try: cmdline = proc.cmdline()
+                    except: pass
 
                     if exe:
                         exe_path = os.path.normcase(os.path.realpath(exe))
@@ -130,7 +198,7 @@ class ServerManager:
                         cmd_str = " ".join(cmd_safe).lower()
                         if f"servers/{plugin_id}/".lower() in cmd_str or f"servers\\{plugin_id}\\".lower() in cmd_str: matched = True
 
-                    if matched: target_procs[p.info['pid']] = psutil.Process(p.info['pid'])
+                    if matched: target_procs[pid] = proc
                 except: pass
 
             all_procs = {}

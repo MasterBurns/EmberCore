@@ -1,5 +1,14 @@
 [
-
+  {
+  "version": "v0.2.0.23",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "FEATURE: Update-Tasks extrem gehärtet (Timeouts, ehrliche Prozentbalken, sichere Abbruch- und Cleanup-Logik, verhindert endlos blockierende Instanzen).",
+    "PERFORMANCE: UI-Latenzen massiv reduziert. Sidebar lädt asynchron und Server-Wechsel erfolgen verzögerungsfrei dank intelligentem Snapshot-Caching und asynchroner Disk-Analysen.",
+    "FEATURE: ASA Cluster Health Check Modul im Frontend inkl. automatisiertem Diagnoselauf beim Server-Start zum Vermeiden von Charakter-Verlusten (Unified Save Data & INI-Regeln).",
+    "BUGFIX: RCON Roundtrip repariert und robustes Argument-Mapping integriert, um doppelte Config-Parameter zuverlässig zu überschreiben."
+  ]
+  },
   {
   "version": "v0.2.0.21",
   "build_date": "2026-08-09",

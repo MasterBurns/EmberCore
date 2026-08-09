@@ -278,4 +278,13 @@ class ClusterManager:
                 }
         return None
 
+    def get_effective_cluster_dir(self, cluster_id: str):
+        db = self._get_db()
+        cdata = db.get(cluster_id)
+        if not cdata: return None
+        shared_dir = cdata.get("shared_dir")
+        if not shared_dir: return None
+        # ASA hängt immer 'clusters/<cluster_id>' an das angegebene Override-Verzeichnis an.
+        return os.path.normcase(os.path.realpath(os.path.join(shared_dir, "clusters", cluster_id)))
+
 cluster_manager = ClusterManager()
