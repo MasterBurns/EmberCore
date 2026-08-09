@@ -1,5 +1,12 @@
 [
   {
+  "version": "v0.2.0.25",
+  "build_date": "2026-08-09",
+  "changelog": [
+    "HOTFIX: Fehlenden 'threading' Import behoben, der zu Abstürzen beim Laden der Echtzeit-Metriken führte."
+  ]
+  },
+  {
   "version": "v0.2.0.24",
   "build_date": "2026-08-09",
   "changelog": [
